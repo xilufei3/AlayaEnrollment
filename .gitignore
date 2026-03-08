@@ -5,6 +5,7 @@
 # IDE/runtime artifacts
 .vscode/
 .runtime/
+AlayaFlow/
 
 # Python artifacts
 __pycache__/
