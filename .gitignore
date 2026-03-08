@@ -1,0 +1,27 @@
+# Local environment
+.env
+.env.local
+
+# IDE/runtime artifacts
+.vscode/
+.runtime/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node artifacts
+node_modules/
+.next/
+.turbo/
+dist/
+build/
+coverage/
+
+# This repo uses pnpm; avoid npm lockfile noise
+**/package-lock.json
