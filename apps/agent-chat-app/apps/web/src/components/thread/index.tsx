@@ -172,7 +172,7 @@ export function Thread() {
     stream.submit(
       { messages: [...toolMessages, newHumanMessage] },
       {
-        streamMode: ["values"],
+        streamMode: ["values", "messages"],
         optimisticValues: (prev) => ({
           ...prev,
           messages: [
@@ -195,7 +195,7 @@ export function Thread() {
     setFirstTokenReceived(false);
     stream.submit(undefined, {
       checkpoint: parentCheckpoint,
-      streamMode: ["values"],
+      streamMode: ["values", "messages"],
     });
   };
 
