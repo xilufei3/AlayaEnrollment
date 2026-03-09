@@ -15,8 +15,7 @@ class WorkflowState(TypedDict, total=False):
 
     query: str
     intent: str
-    
-    chunks: list[Document]
 
+    chunks: list[Document]
     answer: str
 

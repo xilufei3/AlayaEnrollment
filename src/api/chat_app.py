@@ -45,17 +45,20 @@ class ThreadHistoryRequest(BaseModel):
 
 
 class RunStreamRequest(BaseModel):
+    """LangGraph SDK compat: accepts both snake_case and camelCase."""
     input: Any | None = None
-    stream_mode: str | list[str] | None = None
+    stream_mode: str | list[str] | None = Field(None, alias="streamMode")
     stream_subgraphs: bool | None = None
     stream_resumable: bool | None = None
-    assistant_id: str | None = None
+    assistant_id: str | None = Field(None, alias="assistantId")
     checkpoint: dict[str, Any] | None = None
-    checkpoint_id: str | None = None
+    checkpoint_id: str | None = Field(None, alias="checkpointId")
     config: dict[str, Any] | None = None
     context: dict[str, Any] | None = None
     command: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
+
+    model_config = {"populate_by_name": True}
 
 
 def _repo_root() -> Path:
@@ -114,7 +117,10 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, Any]:
-        return {"ok": True, "runtime_ready": app.state.startup_error is None}
+        out: dict[str, Any] = {"ok": True, "runtime_ready": app.state.startup_error is None}
+        if app.state.startup_error is not None:
+            out["startup_error"] = str(app.state.startup_error)
+        return out
 
     @app.get("/info")
     def info() -> dict[str, Any]:
