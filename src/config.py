@@ -34,9 +34,9 @@ DEFAULT_FALLBACK_INTENT: IntentType = IntentType.ADMISSION_POLICY
 
 # intent -> vector collection name
 INTENT_COLLECTION_MAP: dict[str, str] = {
-    IntentType.SCHOOL_OVERVIEW.value: "sustech_school_overview",
-    IntentType.ADMISSION_POLICY.value: "sustech_admission_policy",
-    IntentType.MAJOR_AND_TRAINING.value: "sustech_major_training",
-    IntentType.CAREER_AND_DEVELOPMENT.value: "sustech_career_development",
-    IntentType.CAMPUS_LIFE.value: "sustech_campus_life",
+    IntentType.SCHOOL_OVERVIEW.value: "school_overview",
+    IntentType.ADMISSION_POLICY.value: "admission_policy",
+    IntentType.MAJOR_AND_TRAINING.value: "majors_and_training",
+    IntentType.CAREER_AND_DEVELOPMENT.value: "None",
+    IntentType.CAMPUS_LIFE.value: "None",
 }

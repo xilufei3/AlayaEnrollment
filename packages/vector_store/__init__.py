@@ -1,8 +1,3 @@
-from .client_factory import (
-    MilvusConfig,
-    create_milvus_client_from_env,
-    create_store_from_env,
-)
 from .errors import (
     DimensionMismatch,
     IndexAlreadyExists,
@@ -13,36 +8,32 @@ from .errors import (
     VectorStoreError,
 )
 from .interfaces import VectorStore
-from .milvus_store import PyMilvusStore
+from .milvus_store import MilvusVectorStore
 from .models import (
-    CreateIndexRequest,
+    CreateCollectionRequest,
     DeleteRequest,
-    IndexMeta,
-    IndexStats,
     SearchHit,
     SearchRequest,
     SearchResult,
     UpsertRequest,
     UpsertResult,
-    VectorItem,
+    VectorRecord,
 )
 
 __all__ = [
     "VectorStore",
-    "PyMilvusStore",
+    "MilvusVectorStore",
     "MilvusConfig",
     "create_milvus_client_from_env",
     "create_store_from_env",
-    "CreateIndexRequest",
+    "CreateCollectionRequest",
     "DeleteRequest",
-    "IndexMeta",
-    "IndexStats",
     "SearchHit",
     "SearchRequest",
     "SearchResult",
     "UpsertRequest",
     "UpsertResult",
-    "VectorItem",
+    "VectorRecord",
     "VectorStoreError",
     "InvalidArgument",
     "IndexNotFound",

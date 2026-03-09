@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import hashlib
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -8,8 +8,13 @@ from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
 
-from packages.vector_store.client_factory import create_store_from_env
-from ..node.runtime_resources import bootstrap_runtime_dirs, register_runtime_models
+from pymilvus import MilvusClient
+
+from packages.alayadata.client import AlayaDataClient
+from packages.retriever.service import RetrieverService
+from packages.vector_store.milvus_store import MilvusVectorStore
+from ..node.runtime_resources import bootstrap_runtime_dirs, load_dotenv_file, register_runtime_models
+from .thread_registry import ThreadRegistry
 
 
 @dataclass(slots=True)
@@ -17,19 +22,28 @@ class RuntimeConfig:
     repo_root: Path
     env_file: Path
     runtime_name: str = "chat-api"
-    vector_index: str = "admission_index"
     vector_top_k: int = 5
-    embed_dim: int = 4
     checkpoint_path: Path | None = None
 
 
-def _hash_embed_query(text: str, dim: int) -> list[float]:
-    digest = hashlib.sha256(text.encode("utf-8")).digest()
-    vec: list[float] = []
-    for i in range(dim):
-        b = digest[i % len(digest)]
-        vec.append((b / 255.0) * 2.0 - 1.0)
-    return vec
+def _create_retriever(env_file: Path | str | None = None) -> tuple[MilvusVectorStore, RetrieverService]:
+    """Construct MilvusVectorStore + AlayaDataClient and wrap in RetrieverService."""
+    load_dotenv_file(env_file)
+    milvus_uri = os.getenv("MILVUS_URI", "http://localhost:19530")
+    milvus_token = os.getenv("MILVUS_TOKEN") or ""
+    milvus_db = os.getenv("MILVUS_DB_NAME") or "default"
+    # support both naming conventions: AlayaData_URL (current .env) and ETL_SERVER_URL (legacy)
+    etl_url = (
+        os.getenv("AlayaData_URL")
+        or os.getenv("ETL_SERVER_URL")
+        or "http://localhost:6000"
+    )
+
+    milvus_client = MilvusClient(uri=milvus_uri, token=milvus_token, db_name=milvus_db)
+    vector_store = MilvusVectorStore(milvus_client)
+    alaya_client = AlayaDataClient(base_url=etl_url)
+    retriever = RetrieverService(store=vector_store, alaya_client=alaya_client)
+    return vector_store, retriever
 
 
 def _load_sqlite_checkpointer(db_path: Path) -> tuple[Any, Any | None]:
@@ -57,6 +71,7 @@ class AdmissionGraphRuntime:
         self._vector_store: Any | None = None
         self._checkpointer: Any | None = None
         self._checkpointer_cm: Any | None = None
+        self._thread_registry: ThreadRegistry | None = None
         self._graph: Any | None = None
         self.runtime_root: Path | None = None
         self._threads: dict[str, dict[str, Any]] = {}
@@ -102,15 +117,14 @@ class AdmissionGraphRuntime:
             env_file=self.cfg.env_file,
         )
 
-        self._vector_store = create_store_from_env(self.cfg.env_file)
+        self._vector_store, retriever = _create_retriever(self.cfg.env_file)
         checkpoint_path = self.cfg.checkpoint_path or (self.runtime_root / "checkpoints.sqlite")
         self._checkpointer, self._checkpointer_cm = _load_sqlite_checkpointer(checkpoint_path)
+        self._thread_registry = ThreadRegistry(self.runtime_root / "thread_registry.sqlite")
 
         self._graph = create_graph(
             {
-                "vector_store": self._vector_store,
-                "embed_query": lambda q: _hash_embed_query(q, self.cfg.embed_dim),
-                "vector_index": self.cfg.vector_index,
+                "retriever": retriever,
                 "vector_top_k": self.cfg.vector_top_k,
                 "intent_model_id": intent_model_id,
                 "generation_model_id": generation_model_id,
@@ -123,7 +137,9 @@ class AdmissionGraphRuntime:
             self._vector_store.close()
         self._vector_store = None
         self._graph = None
-
+        if self._thread_registry is not None:
+            self._thread_registry.close()
+            self._thread_registry = None
         if self._checkpointer_cm is not None:
             exit_fn = getattr(self._checkpointer_cm, "__exit__", None)
             if callable(exit_fn):
@@ -143,6 +159,13 @@ class AdmissionGraphRuntime:
                 thread_meta.update(metadata)
                 existing["metadata"] = thread_meta
                 existing["updated_at"] = now
+            if self._thread_registry is not None:
+                self._thread_registry.create_or_update(
+                    thread_id=tid,
+                    created_at=existing.get("created_at", now),
+                    updated_at=now,
+                    metadata=existing.get("metadata"),
+                )
             return existing
 
         thread = {
@@ -156,6 +179,13 @@ class AdmissionGraphRuntime:
             "interrupts": {},
         }
         self._threads[tid] = thread
+        if self._thread_registry is not None:
+            self._thread_registry.create_or_update(
+                thread_id=tid,
+                created_at=now,
+                updated_at=now,
+                metadata=thread["metadata"],
+            )
         return thread
 
     def search_threads(
@@ -165,6 +195,29 @@ class AdmissionGraphRuntime:
         limit: int = 10,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        if self._thread_registry is not None:
+            rows = self._thread_registry.list_threads(
+                metadata_filter=metadata,
+                limit=limit,
+                offset=offset,
+            )
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                tid = row["thread_id"]
+                state = self.get_thread_state(thread_id=tid)
+                values = state.get("values", {}) if isinstance(state, dict) else {}
+                result.append({
+                    "thread_id": tid,
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "state_updated_at": row["updated_at"],
+                    "metadata": row["metadata"],
+                    "status": "idle",
+                    "values": values,
+                    "interrupts": {},
+                })
+            return result
+
         items = list(self._threads.values())
         if metadata:
 
@@ -399,6 +452,11 @@ class AdmissionGraphRuntime:
             thread["status"] = "idle"
             thread["updated_at"] = self._now_iso()
             thread["state_updated_at"] = thread["updated_at"]
+            if self._thread_registry is not None:
+                self._thread_registry.update_timestamp(
+                    thread_id=thread_id,
+                    updated_at=thread["updated_at"],
+                )
 
         return run_id, _iter()
 
