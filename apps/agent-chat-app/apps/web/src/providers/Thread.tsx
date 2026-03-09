@@ -1,4 +1,3 @@
-import { validate } from "uuid";
 import { getApiKey } from "@/lib/api-key";
 import { Thread } from "@langchain/langgraph-sdk";
 import { useQueryState } from "nuqs";
@@ -12,6 +11,10 @@ import {
   SetStateAction,
 } from "react";
 import { createClient } from "./client";
+import {
+  getThreadSearchMetadata,
+  resolveThreadConnection,
+} from "./thread-query-config";
 
 interface ThreadContextType {
   getThreads: () => Promise<Thread[]>;
@@ -23,16 +26,6 @@ interface ThreadContextType {
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
 
-function getThreadSearchMetadata(
-  assistantId: string,
-): { graph_id: string } | { assistant_id: string } {
-  if (validate(assistantId)) {
-    return { assistant_id: assistantId };
-  } else {
-    return { graph_id: assistantId };
-  }
-}
-
 export function ThreadProvider({ children }: { children: ReactNode }) {
   const [apiUrl] = useQueryState("apiUrl");
   const [assistantId] = useQueryState("assistantId");
@@ -40,12 +33,21 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [threadsLoading, setThreadsLoading] = useState(false);
 
   const getThreads = useCallback(async (): Promise<Thread[]> => {
-    if (!apiUrl || !assistantId) return [];
-    const client = createClient(apiUrl, getApiKey() ?? undefined);
+    const { apiUrl: resolvedApiUrl, assistantId: resolvedAssistantId } =
+      resolveThreadConnection({
+        apiUrlFromQuery: apiUrl,
+        assistantIdFromQuery: assistantId,
+        envApiUrl: process.env.NEXT_PUBLIC_API_URL,
+        envAssistantId: process.env.NEXT_PUBLIC_ASSISTANT_ID,
+      });
+
+    if (!resolvedApiUrl || !resolvedAssistantId) return [];
+
+    const client = createClient(resolvedApiUrl, getApiKey() ?? undefined);
 
     const threads = await client.threads.search({
       metadata: {
-        ...getThreadSearchMetadata(assistantId),
+        ...getThreadSearchMetadata(resolvedAssistantId),
       },
       limit: 100,
     });
