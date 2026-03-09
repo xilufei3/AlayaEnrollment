@@ -80,3 +80,7 @@ npm run dev
 
 - 根目录 `.env` 同时用于后端运行时和前端默认配置。
 - `AlayaFlow/` 目录当前不纳入本仓库版本管理（已忽略）。
+
+## Additional Docs
+
+- AlayaData -> Milvus ingest guide: docs/milvus-ingestion-guide.md

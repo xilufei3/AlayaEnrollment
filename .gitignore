@@ -2,10 +2,20 @@
 .env
 .env.local
 
-# IDE/runtime artifacts
-.vscode/
+# Runtime / 运行时生成（勿提交）
 .runtime/
 AlayaFlow/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Milvus / Docker 卷数据（etcd、minio、milvus 等）
+infra/milvus/volumes_clean/
+infra/**/volumes_*/
+infra/**/volumes/
+
+# IDE
+.vscode/
 
 # Python artifacts
 __pycache__/
@@ -26,3 +36,5 @@ coverage/
 
 # This repo uses pnpm; avoid npm lockfile noise
 **/package-lock.json
+
+tests/*
