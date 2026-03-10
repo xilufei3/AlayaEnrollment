@@ -83,4 +83,10 @@ npm run dev
 
 ## Additional Docs
 
-- AlayaData -> Milvus ingest guide: docs/milvus-ingestion-guide.md
+完整文档请查看 **[docs/README.md](docs/README.md)**，包括：
+
+- [部署指南](docs/deployment.md) — 环境、Milvus、后端与前端部署
+- [使用指南](docs/usage.md) — 聊天 API、前端使用、环境变量
+- [数据导入](docs/data-import.md) — AlayaData → Milvus 导入流程与 CLI
+- [AlayaData → Milvus 导入说明](docs/milvus-ingestion-guide.md) — 详细组件与故障排查
+- [系统架构与 Milvus 层次](docs/system-architecture-milvus-layers.md) — 插入/检索链路设计
