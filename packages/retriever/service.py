@@ -21,6 +21,7 @@ class RetrieverService:
         collection: str,
         query: str,
         top_k: int = 5,
+        filter_expression: str | None = None,
     ) -> SearchResult:
         embedding = self._alaya_client.embed_query(query)
 
@@ -29,5 +30,6 @@ class RetrieverService:
                 collection=collection,
                 query_vector=embedding.embedding_vector,
                 top_k=top_k,
+                filter_expression=filter_expression,
             )
         )

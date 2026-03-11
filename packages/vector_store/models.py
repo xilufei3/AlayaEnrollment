@@ -82,6 +82,7 @@ class SearchRequest:
     collection: str
     query_vector: Sequence[float]
     top_k: int = 5
+    filter_expression: str | None = None
 
 
 @dataclass(slots=True)

@@ -22,7 +22,7 @@ from .models import (
 )
 
 
-# 主键为字符串时的最大长度（VARCHAR）
+# Primary key max length for varchar id field.
 PRIMARY_KEY_MAX_LENGTH = 512
 
 
@@ -101,18 +101,22 @@ class MilvusVectorStore(VectorStore):
         return DeleteResult(deleted=deleted)
 
     def search(self, req: SearchRequest) -> SearchResult:
-        raw = self._client.search(
-            collection_name=req.collection,
-            data=[list(req.query_vector)],
-            limit=req.top_k,
-            output_fields=["*"],
-        )
+        search_kwargs: dict[str, Any] = {
+            "collection_name": req.collection,
+            "data": [list(req.query_vector)],
+            "limit": req.top_k,
+            "output_fields": ["*"],
+        }
+        if req.filter_expression:
+            search_kwargs["filter"] = req.filter_expression
+
+        raw = self._client.search(**search_kwargs)
 
         hits: list[SearchHit] = []
         if not raw:
             return SearchResult(hits=hits)
 
-        # 单个 query，一般取第一组结果
+        # Single query search: usually take first result set.
         for item in raw[0]:
             entity = dict(item.get("entity", {}))
             entity.pop("id", None)
