@@ -5,18 +5,30 @@ from typing import Any, Dict
 from langgraph.graph import END, START, StateGraph
 
 try:
+    from .config import CONFIDENCE_THRESHOLD, IntentType
     from .node.generation import create_generation_node
-    from .node.intend_clasaify import create_intend_classify_node
-    from .node.rerank import create_rerank_node
-    from .node.vector_retrieve import create_vector_retrieve_node
+    from .node.intent_classify import create_intent_classify_node
     from .schemas import WorkflowState
+    from .agentic_rag.graph import create_agentic_rag_node
 except ImportError:
-    # fallback when run from repo root (e.g. uvicorn src.api.chat_app:app)
+    from src.config import CONFIDENCE_THRESHOLD, IntentType
     from src.node.generation import create_generation_node
-    from src.node.intend_clasaify import create_intend_classify_node
-    from src.node.rerank import create_rerank_node
-    from src.node.vector_retrieve import create_vector_retrieve_node
+    from src.node.intent_classify import create_intent_classify_node
     from src.schemas import WorkflowState
+    from src.agentic_rag.graph import create_agentic_rag_node
+
+
+def route_after_intent(state: WorkflowState) -> str:
+    intent = str(state.get("intent") or "").strip()
+    confidence = float(state.get("confidence") or 0.0)
+    missing_slots = state.get("missing_slots") or []
+
+    if (
+        intent in (IntentType.OUT_OF_SCOPE.value, IntentType.OTHER.value)
+        or confidence < CONFIDENCE_THRESHOLD
+    ):
+        return "generate"
+    return "agentic_rag"
 
 
 def create_graph(
@@ -24,10 +36,6 @@ def create_graph(
     *,
     checkpointer: Any | None = None,
 ):
-    """
-    4-step pipeline:
-    intent classify -> vector retrieve -> rerank -> generation
-    """
     init_args = init_args or {}
 
     retriever = init_args.get("retriever")
@@ -37,21 +45,33 @@ def create_graph(
             "(a packages.retriever.service.RetrieverService instance)"
         )
 
-    vector_top_k = int(init_args.get("vector_top_k", 5))
+    vector_top_k = int(init_args.get("vector_top_k", 8))
+    rag_max_iterations = int(init_args.get("rag_max_iterations", 2))
     intent_model_id = init_args.get("intent_model_id")
     generation_model_id = init_args.get("generation_model_id")
-
     g = StateGraph(WorkflowState)
-
-    g.add_node("intent", create_intend_classify_node(model_id=intent_model_id))
-    g.add_node("retrieve",create_vector_retrieve_node(retriever=retriever, top_k=vector_top_k))
-    g.add_node("rerank", create_rerank_node())
+    g.add_node("intent_classify", create_intent_classify_node(model_id=intent_model_id))
+    g.add_node(
+        "agentic_rag",
+        create_agentic_rag_node(
+            retriever=retriever,
+            top_k=vector_top_k,
+            max_iterations=rag_max_iterations,
+            eval_model_id=intent_model_id,
+        ),
+    )
     g.add_node("generate", create_generation_node(model_id=generation_model_id))
 
-    g.add_edge(START, "intent")
-    g.add_edge("intent", "retrieve")
-    g.add_edge("retrieve", "rerank")
-    g.add_edge("rerank", "generate")
+    g.add_edge(START, "intent_classify")
+    g.add_conditional_edges(
+        "intent_classify",
+        route_after_intent,
+        {
+            "generate": "generate",
+            "agentic_rag": "agentic_rag",
+        },
+    )
+    g.add_edge("agentic_rag", "generate")
     g.add_edge("generate", END)
 
     final_checkpointer = checkpointer if checkpointer is not None else init_args.get("checkpointer")

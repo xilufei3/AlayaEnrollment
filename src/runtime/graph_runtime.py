@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -17,12 +17,41 @@ from ..node.runtime_resources import bootstrap_runtime_dirs, load_dotenv_file, r
 from .thread_registry import ThreadRegistry
 
 
+def _build_langfuse_handler(
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Any | None:
+    """
+    按需构建 Langfuse CallbackHandler。
+    若未安装 langfuse 包或未配置 LANGFUSE_PUBLIC_KEY，静默返回 None。
+    """
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+    if not public_key or not secret_key or public_key.endswith("-"):
+        return None
+    try:
+        from langfuse.langchain import CallbackHandler
+        kwargs: dict[str, Any] = {}
+        if session_id:
+            kwargs["session_id"] = session_id
+        if user_id:
+            kwargs["user_id"] = user_id
+        if metadata:
+            kwargs["metadata"] = metadata
+        return CallbackHandler(**kwargs)
+    except Exception:
+        return None
+
+
 @dataclass(slots=True)
 class RuntimeConfig:
     repo_root: Path
     env_file: Path
     runtime_name: str = "chat-api"
-    vector_top_k: int = 5
+    vector_top_k: int = 8
+    rag_max_iterations: int = 2
     checkpoint_path: Path | None = None
 
 
@@ -64,7 +93,11 @@ def _load_sqlite_checkpointer(db_path: Path) -> tuple[Any, Any | None]:
 
 
 class AdmissionGraphRuntime:
-    STAGE_ORDER = ("intent", "retrieve", "rerank", "generate")
+    STAGE_ORDER = (
+        "intent_classify",   # 意图识别
+        "agentic_rag",      # Agentic RAG（检索+评估循环）
+        "generate",         # 生成答案（含 out_of_scope / 缺槽位追问 / other / RAG 回答）
+    )
 
     def __init__(self, cfg: RuntimeConfig) -> None:
         self.cfg = cfg
@@ -122,10 +155,20 @@ class AdmissionGraphRuntime:
         self._checkpointer, self._checkpointer_cm = _load_sqlite_checkpointer(checkpoint_path)
         self._thread_registry = ThreadRegistry(self.runtime_root / "thread_registry.sqlite")
 
+        # 检查 Langfuse 是否可用
+        _probe = _build_langfuse_handler()
+        if _probe is not None:
+            import logging
+            logging.getLogger(__name__).info(
+                "Langfuse tracing enabled. host=%s",
+                os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+            )
+
         self._graph = create_graph(
             {
                 "retriever": retriever,
                 "vector_top_k": self.cfg.vector_top_k,
+                "rag_max_iterations": self.cfg.rag_max_iterations,
                 "intent_model_id": intent_model_id,
                 "generation_model_id": generation_model_id,
             },
@@ -395,7 +438,13 @@ class AdmissionGraphRuntime:
                 initial_state["messages"] = merged_messages
 
         run_id = str(uuid4())
-        config = {"configurable": {"thread_id": thread_id}}
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+        lf_handler = _build_langfuse_handler(
+            session_id=thread_id,
+            metadata={"run_id": run_id, "source": "langgraph_sdk"},
+        )
+        if lf_handler is not None:
+            config["callbacks"] = [lf_handler]
         mode = stream_mode or "values"
 
         def _iter() -> Iterator[tuple[str, Any]]:
@@ -418,7 +467,8 @@ class AdmissionGraphRuntime:
                         if isinstance(maybe_meta, dict):
                             meta = maybe_meta
                     node_name = str((meta or {}).get("langgraph_node", "")).strip()
-                    if node_name and node_name != "generate":
+                    _answer_nodes = {"generate"}
+                    if node_name and node_name not in _answer_nodes:
                         continue
 
                 payload = self._jsonable(event_data)
@@ -466,7 +516,13 @@ class AdmissionGraphRuntime:
 
         started: set[str] = set()
         result_answer = ""
-        config = {"configurable": {"thread_id": session_id}}
+        config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
+        lf_handler = _build_langfuse_handler(
+            session_id=session_id,
+            metadata={"source": "chat_stream"},
+        )
+        if lf_handler is not None:
+            config["callbacks"] = [lf_handler]
 
         yield {
             "event": "session.started",
@@ -489,11 +545,15 @@ class AdmissionGraphRuntime:
 
                 summary: dict[str, Any] = {"stage": node_name, "session_id": session_id}
                 if isinstance(payload, dict):
-                    if node_name == "intent":
+                    if node_name == "intent_classify":
                         summary["intent"] = payload.get("intent", "")
-                    elif node_name in ("retrieve", "rerank"):
+                        summary["confidence"] = payload.get("confidence", 0.0)
+                    elif node_name == "agentic_rag":
                         chunks = payload.get("chunks", []) or []
                         summary["chunks_count"] = len(chunks)
+                        missing = payload.get("missing_slots") or []
+                        if missing:
+                            summary["missing_slots"] = missing
                     elif node_name == "generate":
                         answer = str(payload.get("answer", "") or "")
                         result_answer = answer

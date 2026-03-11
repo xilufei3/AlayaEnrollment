@@ -1,12 +1,14 @@
-﻿from typing import Any, Dict, List, Optional, Sequence, Union
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from langchain_core.documents import Document
-from langgraph.runtime import Runtime
 
 from alayaflow.component.model import ModelManager
 from alayaflow.utils.logger import AlayaFlowLogger
 
-from ..schemas import WorkflowState
+from ...config import RERANK_MODEL_ID, RERANK_TOP_N
+from ..schemas import RAGState
 
 
 logger = AlayaFlowLogger()
@@ -63,47 +65,34 @@ class JinaRerankerComponent:
             documents=documents,
             query=query,
         )
-
         logger.debug(
-            "Invoke JinaReranker.\n"
-            f"reranker: {self.model_id}\n"
-            f"top_n: {self.top_n}\n"
-            f"query: {query}\n"
-            f"in_docs: {len(documents)}\n"
-            f"out_docs: {len(reranked_docs)}"
+            "JinaReranker done.\n"
+            f"model={self.model_id}\n"
+            f"top_n={self.top_n}\n"
+            f"in={len(documents)}\n"
+            f"out={len(reranked_docs)}"
         )
         return reranked_docs
 
 
 def create_rerank_node():
-    rerank_model_id = "jina-reranker"
-    top_n = 5
-
-    def rerank_node(state: WorkflowState, runtime: Runtime[Any]):
-        query = state.get("query")
-        chunks = state.get("chunks", [])
+    def rerank_node(state: RAGState) -> dict[str, Any]:
+        query = str(state.get("query") or "").strip()
+        chunks = list(state.get("chunks") or [])
 
         if not query or not chunks:
             logger.debug(
-                f"Rerank node skipped: query_empty={not bool(query)}, chunks_empty={not bool(chunks)}"
+                f"Rerank skipped: query_empty={not query}, chunks_empty={not chunks}"
             )
-            return {"chunks": chunks}
-
-        model_id = rerank_model_id or getattr(getattr(runtime, "context", None), "rerank_model_id", None)
-        if model_id is None:
-            logger.warning("Rerank model id missing, skip rerank")
             return {"chunks": chunks}
 
         try:
-            reranker = JinaRerankerComponent(model_id=model_id, top_n=top_n)
-            reranked_chunks = reranker(query=query, docs=chunks)
-            logger.debug(
-                "Rerank done. "
-                f"in_chunks={len(chunks)}, out_chunks={len(reranked_chunks)}, model_id={model_id}"
-            )
-            return {"chunks": reranked_chunks}
-        except Exception as e:
-            logger.error(f"Rerank error {type(e).__name__}: {e}")
+            reranker = JinaRerankerComponent(model_id=RERANK_MODEL_ID, top_n=RERANK_TOP_N)
+            reranked = reranker(query=query, docs=chunks)
+            logger.debug(f"Rerank done. in={len(chunks)} out={len(reranked)}")
+            return {"chunks": reranked}
+        except Exception as exc:
+            logger.error(f"Rerank error {type(exc).__name__}: {exc}")
             return {"chunks": chunks}
 
     return rerank_node

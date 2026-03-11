@@ -1,21 +1,28 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import TypedDict
 
-from langchain_core.messages import BaseMessage
 from langchain_core.documents import Document
-from pydantic import BaseModel, Field
+from langchain_core.messages import BaseMessage
 
 
 class WorkflowState(TypedDict, total=False):
-    # 会话基础
+    # Conversation basics
     thread_id: str
     turn_id: str
     messages: list[BaseMessage]
 
     query: str
     intent: str
+    confidence: float
 
+    # Slot extraction for policy questions
+    slots: dict[str, str]
+    missing_slots: list[str]
+
+    # Retrieval + generation
     chunks: list[Document]
-    answer: str
+    citations: list[dict[str, str]]
+    retrieval_skipped: bool
 
+    answer: str
