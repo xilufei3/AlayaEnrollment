@@ -27,13 +27,20 @@ def _build_langfuse_handler(
     按需构建 Langfuse CallbackHandler。
     若未安装 langfuse 包或未配置 LANGFUSE_PUBLIC_KEY，静默返回 None。
     """
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+    host = (
+        os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
+    ).strip().rstrip("/")
     if not public_key or not secret_key or public_key.endswith("-"):
         return None
     try:
         from langfuse.langchain import CallbackHandler
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, Any] = {
+            "public_key": public_key,
+            "secret_key": secret_key,
+            "host": host,
+        }
         if session_id:
             kwargs["session_id"] = session_id
         if user_id:
@@ -142,6 +149,9 @@ class AdmissionGraphRuntime:
         return str(value)
 
     def startup(self) -> None:
+        # 最先加载 .env，确保后续所有代码（含 Langfuse）能读到环境变量
+        load_dotenv_file(self.cfg.env_file)
+
         self.runtime_root = bootstrap_runtime_dirs(self.cfg.repo_root, runtime_name=self.cfg.runtime_name)
         from ..graph import create_graph
 
@@ -158,10 +168,13 @@ class AdmissionGraphRuntime:
         # 检查 Langfuse 是否可用
         _probe = _build_langfuse_handler()
         if _probe is not None:
+            import sys
+            host = os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
+            print(f"[AlayaEnrollment] Langfuse tracing enabled. host={host}", file=sys.stderr, flush=True)
             import logging
             logging.getLogger(__name__).info(
                 "Langfuse tracing enabled. host=%s",
-                os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+                host,
             )
 
         self._graph = create_graph(
@@ -507,6 +520,12 @@ class AdmissionGraphRuntime:
                     thread_id=thread_id,
                     updated_at=thread["updated_at"],
                 )
+            # 确保 Langfuse 把本请求的 trace 上报
+            if lf_handler is not None and hasattr(lf_handler, "flush"):
+                try:
+                    lf_handler.flush()
+                except Exception:
+                    pass
 
         return run_id, _iter()
 
@@ -560,6 +579,12 @@ class AdmissionGraphRuntime:
                         summary["answer_len"] = len(answer)
 
                 yield {"event": "stage.completed", "data": summary}
+
+        if lf_handler is not None and hasattr(lf_handler, "flush"):
+            try:
+                lf_handler.flush()
+            except Exception:
+                pass
 
         yield {
             "event": "message.completed",

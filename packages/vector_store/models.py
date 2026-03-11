@@ -22,6 +22,15 @@ class CreateCollectionRequest:
 
 
 @dataclass(slots=True)
+class CreateHybridCollectionRequest:
+    """创建支持混合检索（向量 + BM25 稀疏）的 collection。"""
+    name: str
+    dimension: int
+    metric: str = "cosine"
+    content_max_length: int = 65535
+
+
+@dataclass(slots=True)
 class DropCollectionRequest:
     name: str
 
@@ -81,6 +90,15 @@ class DeleteResult:
 class SearchRequest:
     collection: str
     query_vector: Sequence[float]
+    top_k: int = 5
+    filter_expression: str | None = None
+
+
+@dataclass(slots=True)
+class SearchSparseRequest:
+    """稀疏向量检索请求（用于 BM25 等）。"""
+    collection: str
+    query_sparse: dict[int, float]  # index -> value
     top_k: int = 5
     filter_expression: str | None = None
 

@@ -6,9 +6,9 @@ from langchain_core.documents import Document
 
 
 class SearchPlan(TypedDict, total=False):
-    strategy: Literal["vector", "structured", "hybrid"]
-    vector_query: str            # 向量检索使用的查询（可经改写）
-    structured_filters: dict[str, str]  # 元数据过滤条件，如 {"province": "浙江", "year": "2025"}
+    strategy: Literal["vector_keyword_hybrid"]
+    vector_query: str       # 向量检索使用的查询（可经 LLM 改写）
+    sub_queries: list[str]  # 可选，子问题列表（多查询检索时使用）
     top_k: int
 
 

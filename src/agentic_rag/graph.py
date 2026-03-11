@@ -48,10 +48,11 @@ def _compile_rag_graph(
     retriever: RetrieverService,
     top_k: int,
     eval_model_id: str | None,
+    search_planner_model_id: str | None = None,
 ) -> Any:
     g = StateGraph(RAGState)
 
-    g.add_node("search_planner", create_search_planner_node())
+    g.add_node("search_planner", create_search_planner_node(model_id=search_planner_model_id))
     g.add_node("retrieval", create_retrieval_node(retriever=retriever, top_k=top_k))
     g.add_node("rerank", create_rerank_node())
     g.add_node("eval", create_sufficiency_eval_node(model_id=eval_model_id))
@@ -78,12 +79,18 @@ def create_agentic_rag_node(
     top_k: int = 8,
     max_iterations: int = 2,
     eval_model_id: str | None = None,
+    search_planner_model_id: str | None = None,
 ):
     """
     工厂函数：返回一个节点函数，供顶层 graph.py 使用。
     该节点将启动 agentic_rag 子图并将结果（chunks, missing_slots）写回 WorkflowState。
     """
-    rag_graph = _compile_rag_graph(retriever=retriever, top_k=top_k, eval_model_id=eval_model_id)
+    rag_graph = _compile_rag_graph(
+        retriever=retriever,
+        top_k=top_k,
+        eval_model_id=eval_model_id,
+        search_planner_model_id=search_planner_model_id,
+    )
 
     def agentic_rag_node(state: Any) -> dict[str, Any]:
         rag_input: RAGState = {

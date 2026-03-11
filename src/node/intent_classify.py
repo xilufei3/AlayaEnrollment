@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Sequence
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.runtime import Runtime
@@ -50,45 +50,11 @@ INTENT_PROMPT_TEMPLATE = """
 - 年份为四位数字字符串，如 "2025"。
 """
 
-# 省份简称归一化：去掉「省/市/自治区」等后缀，便于与 Milvus 元数据一致
-_PROVINCE_SUFFIXES = ("省", "市", "自治区", "特别行政区")
-def _normalize_province(value: str) -> str:
-    v = value.strip()
-    for s in _PROVINCE_SUFFIXES:
-        if v.endswith(s):
-            return v[: -len(s)].strip() or v
-    return v
-
-
 class IntentClassificationResult(BaseModel):
     intent: str = Field(..., description="intent label")
     reason: str = Field(..., description="short reason")
     confidence: float = Field(..., ge=0.0, le=1.0)
     slots: dict[str, str] = Field(default_factory=dict, description="extracted slots: province, year")
-
-
-def _normalize_slots(raw: dict[str, Any]) -> dict[str, str]:
-    """清洗并归一化槽位：省份去后缀，年份保证四位数字。"""
-    out: dict[str, str] = {}
-    for k, v in (raw or {}).items():
-        if not isinstance(v, str):
-            v = str(v).strip()
-        else:
-            v = v.strip()
-        if not v:
-            continue
-        if k == "province":
-            out[k] = _normalize_province(v)
-        elif k == "year":
-            if v.isdigit() and len(v) == 4 and v.startswith("20"):
-                out[k] = v
-            elif v.isdigit() and len(v) == 4:
-                out[k] = v
-            else:
-                out[k] = v[:4] if len(v) >= 4 else v
-        else:
-            out[k] = v
-    return out
 
 
 def get_missing_slots_for_intent(intent: str, slots: dict[str, str]) -> list[str]:
@@ -119,7 +85,7 @@ class EnrollmentIntentClassifier:
         self,
         *,
         query: str,
-        conversation_context: str = "",
+        conversation_context: Sequence[Any] = (),
         model_id: str | None = None,
     ) -> IntentClassificationResult:
         active_model_id = model_id or self.model_id
@@ -131,18 +97,15 @@ class EnrollmentIntentClassifier:
             intent_descriptions=json.dumps(INTENT_DESCRIPTIONS, ensure_ascii=False, indent=2),
             slot_descriptions=json.dumps(SLOT_DESCRIPTIONS, ensure_ascii=False, indent=2),
         )
-        if conversation_context.strip():
-            user_prompt = (
-                f"以下为最近几轮对话（仅供参考）：\n{conversation_context.strip()}\n\n"
-                f"当前用户问题：{query}\n{self._parser.get_format_instructions()}"
-            )
-        else:
-            user_prompt = f"用户问题：{query}\n{self._parser.get_format_instructions()}"
-
-        response = model.invoke(
-            [("system", system_prompt.to_string()), ("user", user_prompt)],
-            response_format={"type": "json_object"},
-        )
+        system_str = system_prompt.to_string()
+        user_tail = f"当前用户问题：{query}\n{self._parser.get_format_instructions()}"
+        history = _normalize_conversation_messages(conversation_context)
+        messages: list[BaseMessage] = [
+            SystemMessage(content=system_str),
+            *history,
+            HumanMessage(content=user_tail),
+        ]
+        response = model.invoke(messages, response_format={"type": "json_object"})
         data = self._parser.parse(response.content)
 
         if not isinstance(data, dict):
@@ -158,7 +121,7 @@ class EnrollmentIntentClassifier:
 
         raw_slots = data.get("slots")
         if isinstance(raw_slots, dict):
-            slots = _normalize_slots(raw_slots)
+            slots = {k: str(v).strip() for k, v in raw_slots.items() if v and str(v).strip()}
         else:
             slots = {}
 
@@ -188,40 +151,36 @@ def _to_text(content: Any) -> str:
     return str(content).strip()
 
 
-def _format_recent_context(state: WorkflowState, max_turns: int | None = None) -> str:
-    """
-    从 state["messages"] 中取「当前问题之前」的最近 max_turns 轮，格式化为字符串供意图分类使用。
-    """
+def _normalize_conversation_messages(raw: Sequence[Any]) -> list[BaseMessage]:
+    """把对话上下文转为 BaseMessage 列表，供模型多轮调用。"""
+    out: list[BaseMessage] = []
+    for msg in raw:
+        if isinstance(msg, BaseMessage):
+            out.append(msg)
+            continue
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role", msg.get("type", ""))).lower()
+        content = _to_text(msg.get("content", ""))
+        if not content:
+            continue
+        if role in ("user", "human"):
+            out.append(HumanMessage(content=content))
+        elif role in ("assistant", "ai"):
+            out.append(AIMessage(content=content))
+    return out
+
+
+def _get_recent_messages(state: WorkflowState, max_turns: int | None = None) -> list[Any]:
+    """从 state["messages"] 取当前问题之前的最近 max_turns 轮，返回原始消息列表（不转 str）。"""
     messages = state.get("messages") or []
     if not messages:
-        return ""
+        return []
     k = max_turns if max_turns is not None else HISTORY_LAST_K_TURNS
-    # 排除最后一条（当前用户输入），再取最后 2*k 条
     previous = messages[:-1]
     if not previous:
-        return ""
-    recent = list(previous)[-(k * 2) :]
-    lines: list[str] = []
-    for msg in recent:
-        role = ""
-        content = ""
-        if isinstance(msg, BaseMessage):
-            t = str(getattr(msg, "type", "")).lower()
-            if t in ("human", "user"):
-                role = "用户"
-            elif t in ("ai", "assistant"):
-                role = "助手"
-            content = _to_text(getattr(msg, "content", ""))
-        elif isinstance(msg, dict):
-            r = str(msg.get("role", msg.get("type", ""))).lower()
-            if r in ("user", "human"):
-                role = "用户"
-            elif r in ("assistant", "ai"):
-                role = "助手"
-            content = _to_text(msg.get("content", ""))
-        if role and content:
-            lines.append(f"{role}：{content}")
-    return "\n".join(lines)
+        return []
+    return list(previous)[-(k * 2) :]
 
 
 def _extract_query_from_state(state: WorkflowState) -> str:
@@ -250,7 +209,7 @@ def create_intent_classify_node(*, model_id: str | None = None):
 
     def intent_classify_node(state: WorkflowState, runtime: Runtime[Any]):
         query = _extract_query_from_state(state)
-        conversation_context = _format_recent_context(state)
+        conversation_context = _get_recent_messages(state)
 
         try:
             runtime_model_id = getattr(getattr(runtime, "context", None), "chat_model_id", None)

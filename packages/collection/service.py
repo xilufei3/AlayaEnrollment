@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
 from packages.alayadata.client import AlayaDataClient
 from packages.alayadata.models import ProcessDocumentRequest
+from packages.retriever.bm25_utils import BM25SparseEncoder
 from packages.vector_store.interfaces import VectorStore
 from packages.vector_store.models import (
     CollectionExistsRequest,
     CollectionExistsResult,
     CreateCollectionRequest,
+    CreateHybridCollectionRequest,
     DeleteRequest,
     DeleteResult,
     DropCollectionRequest,
@@ -58,6 +61,27 @@ class CollectionService:
                 )
             )
 
+    def create_hybrid_collection(
+        self,
+        collection_name: str,
+        dimension: int,
+        metric: str = "cosine",
+        content_max_length: int = 65535,
+    ) -> None:
+        """创建支持混合检索的 collection（需 store 实现 create_hybrid_collection）。"""
+        if not hasattr(self._store, "create_hybrid_collection"):
+            raise NotImplementedError("store does not support create_hybrid_collection")
+        exists = self._store.collection_exists(CollectionExistsRequest(name=collection_name))
+        if not exists.exists:
+            self._store.create_hybrid_collection(
+                CreateHybridCollectionRequest(
+                    name=collection_name,
+                    dimension=dimension,
+                    metric=metric.lower(),
+                    content_max_length=content_max_length,
+                )
+            )
+
     def drop_collection(self, collection_name: str) -> None:
         """Drop a collection if it exists."""
         self._store.drop_collection(DropCollectionRequest(name=collection_name))
@@ -97,10 +121,31 @@ class CollectionService:
         max_wait: int | None = 300,
         batch_size: int = 64,
         extra_metadata: dict[str, Any] | None = None,
+        enable_hybrid: bool = False,
+        bm25_state_dir: str | Path | None = None,
     ) -> InsertFilesResult:
-        """Process files through ETL and upsert chunks into one collection."""
+        """Process files through ETL and upsert chunks. enable_hybrid=True 时写入 content+sparse_vector 并保存 BM25 状态。"""
         result = InsertFilesResult(collection=collection_name, files_processed=0, chunks_written=0)
         inferred_dim: int | None = dimension
+        bm25_dir = Path(bm25_state_dir or os.environ.get("BM25_STATE_DIR", "data/bm25_state"))
+
+        if enable_hybrid:
+            return self._insert_files_hybrid(
+                collection_name=collection_name,
+                file_paths=file_paths,
+                result=result,
+                inferred_dim=inferred_dim,
+                metric=metric,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                enable_ocr=enable_ocr,
+                parser_preference=parser_preference,
+                poll_interval=poll_interval,
+                max_wait=max_wait,
+                batch_size=batch_size,
+                extra_metadata=extra_metadata,
+                bm25_dir=bm25_dir,
+            )
 
         for raw_path in file_paths:
             path = Path(raw_path)
@@ -168,6 +213,114 @@ class CollectionService:
 
             result.files_processed += 1
 
+        if (
+            hasattr(self._store, "ensure_index_and_load")
+            and inferred_dim is not None
+            and result.chunks_written > 0
+        ):
+            self._store.ensure_index_and_load(
+                collection_name,
+                dimension=inferred_dim,
+                metric=metric,
+                is_hybrid=False,
+            )
+        return result
+
+    def _insert_files_hybrid(
+        self,
+        collection_name: str,
+        file_paths: Sequence[Path | str],
+        result: InsertFilesResult,
+        inferred_dim: int | None,
+        metric: str,
+        chunk_size: int,
+        chunk_overlap: int,
+        enable_ocr: bool,
+        parser_preference: Sequence[str],
+        poll_interval: float,
+        max_wait: int | None,
+        batch_size: int,
+        extra_metadata: dict[str, Any] | None,
+        bm25_dir: Path,
+    ) -> InsertFilesResult:
+        """两阶段：先收集所有 chunk 文本，fit BM25，再统一 embed + 写入 hybrid collection。"""
+        all_chunks: list[tuple[str, dict[str, Any], str]] = []  # (text, meta, rid)
+        for raw_path in file_paths:
+            path = Path(raw_path)
+            if not path.is_file():
+                result.skipped_files.append(str(path))
+                continue
+            try:
+                job_result = self._alaya_client.process_document(
+                    ProcessDocumentRequest(
+                        file_path=path,
+                        chunk_size=chunk_size,
+                        chunk_overlap=chunk_overlap,
+                        enable_ocr=enable_ocr,
+                        parser_preference=list(parser_preference),
+                        poll_interval=poll_interval,
+                        max_wait=max_wait,
+                    )
+                )
+            except Exception:
+                result.skipped_files.append(str(path))
+                continue
+            parse = job_result.parse or {}
+            source_name = parse.get("source_name", path.name)
+            chunks = [c for c in job_result.data if self._chunk_text(c).strip()]
+            for i, chunk in enumerate(chunks):
+                text = self._chunk_text(chunk)
+                rid = self._record_id(collection_name, job_result.job_id, i, text)
+                meta: dict[str, Any] = {
+                    "job_id": job_result.job_id,
+                    "doc_id": job_result.doc_id,
+                    "dataset": job_result.dataset,
+                    "source_name": source_name,
+                    "chunk_index": i,
+                    "slice_id": chunk.get("slice_id"),
+                    "slice_type": chunk.get("slice_type", "text"),
+                    "text": text,
+                    **(extra_metadata or {}),
+                }
+                all_chunks.append((text, meta, rid))
+            result.files_processed += 1
+
+        if not all_chunks:
+            return result
+
+        texts = [c[0] for c in all_chunks]
+        bm25 = BM25SparseEncoder()
+        bm25.fit(texts)
+
+        if inferred_dim is None:
+            emb0 = self._alaya_client.embed_query(texts[0])
+            inferred_dim = len(emb0.embedding_vector)
+
+        if hasattr(self._store, "create_hybrid_collection"):
+            self.create_hybrid_collection(
+                collection_name, dimension=inferred_dim, metric=metric, content_max_length=65535
+            )
+
+        for start in range(0, len(all_chunks), batch_size):
+            batch_data = all_chunks[start : start + batch_size]
+            records: list[VectorRecord] = []
+            for text, meta, rid in batch_data:
+                emb = self._alaya_client.embed_query(text)
+                sparse = bm25.encode_doc(text)
+                meta["content"] = text
+                meta["sparse_vector"] = sparse
+                records.append(VectorRecord(id=rid, vector=emb.embedding_vector, metadata=meta))
+            upsert_result = self._store.upsert(UpsertRequest(collection=collection_name, records=records))
+            result.chunks_written += upsert_result.written
+
+        if hasattr(self._store, "ensure_index_and_load"):
+            self._store.ensure_index_and_load(
+                collection_name,
+                dimension=inferred_dim,
+                metric=metric,
+                is_hybrid=True,
+            )
+        bm25.save(bm25_dir / f"{collection_name}.json")
         return result
 
     @staticmethod

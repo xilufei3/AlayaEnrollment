@@ -92,6 +92,22 @@ def main() -> int:
         default=ENV_FILE,
         help=".env 文件路径",
     )
+    parser.add_argument(
+        "--drop",
+        action="store_true",
+        help="导入前先删除已存在的同名 collection（必须与 --hybrid 配合使用，否则 schema 不匹配会报错）",
+    )
+    parser.add_argument(
+        "--hybrid",
+        action="store_true",
+        help="启用混合检索：写入 content + BM25 稀疏向量，并保存 BM25 状态（需 store 支持 create_hybrid_collection）",
+    )
+    parser.add_argument(
+        "--bm25-state-dir",
+        type=Path,
+        default=None,
+        help="BM25 状态保存目录（默认 data/bm25_state 或环境变量 BM25_STATE_DIR）",
+    )
     args = parser.parse_args()
 
     load_dotenv(args.env_file)
@@ -136,6 +152,14 @@ def main() -> int:
     alaya_client = AlayaDataClient(base_url=get_etl_url(), timeout=DEFAULT_ETL_TIMEOUT)
     service = CollectionService(store=store, alaya_client=alaya_client)
 
+    if args.drop:
+        existing = service.collection_exists(collection_name)
+        if existing.exists:
+            print(f"删除旧 collection: {collection_name}")
+            service.drop_collection(collection_name)
+        else:
+            print(f"collection 不存在，跳过删除: {collection_name}")
+
     try:
         result: InsertFilesResult = service.insert_files(
             collection_name,
@@ -144,6 +168,8 @@ def main() -> int:
             chunk_overlap=args.chunk_overlap,
             enable_ocr=not args.no_ocr,
             batch_size=args.batch_size,
+            enable_hybrid=args.hybrid,
+            bm25_state_dir=args.bm25_state_dir,
         )
     except KeyboardInterrupt:
         print("\n已中断", file=sys.stderr)

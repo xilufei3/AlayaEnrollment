@@ -24,7 +24,7 @@ class ThreadRegistry:
     def _ensure_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(str(self._path), check_same_thread=True)
+            self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS threads (

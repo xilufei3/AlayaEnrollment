@@ -58,6 +58,7 @@ def create_graph(
             top_k=vector_top_k,
             max_iterations=rag_max_iterations,
             eval_model_id=intent_model_id,
+            search_planner_model_id=intent_model_id,
         ),
     )
     g.add_node("generate", create_generation_node(model_id=generation_model_id))
