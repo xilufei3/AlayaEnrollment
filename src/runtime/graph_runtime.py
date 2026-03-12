@@ -4,6 +4,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from inspect import signature
 from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
@@ -36,17 +37,35 @@ def _build_langfuse_handler(
         return None
     try:
         from langfuse.langchain import CallbackHandler
-        kwargs: dict[str, Any] = {
+
+        accepted = set(signature(CallbackHandler.__init__).parameters.keys())
+
+        # langfuse v3 的 CallbackHandler 不再接收 secret_key/host，需先初始化 client。
+        if "secret_key" not in accepted and "host" not in accepted:
+            try:
+                from langfuse import Langfuse
+
+                Langfuse(
+                    public_key=public_key,
+                    secret_key=secret_key,
+                    host=host,
+                )
+            except Exception:
+                pass
+
+        candidate_kwargs: dict[str, Any] = {
             "public_key": public_key,
             "secret_key": secret_key,
             "host": host,
+            "session_id": session_id,
+            "user_id": user_id,
+            "metadata": metadata,
         }
-        if session_id:
-            kwargs["session_id"] = session_id
-        if user_id:
-            kwargs["user_id"] = user_id
-        if metadata:
-            kwargs["metadata"] = metadata
+        kwargs: dict[str, Any] = {}
+        for key, value in candidate_kwargs.items():
+            if value is not None and key in accepted:
+                kwargs[key] = value
+
         return CallbackHandler(**kwargs)
     except Exception:
         return None
