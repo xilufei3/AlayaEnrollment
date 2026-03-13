@@ -46,14 +46,8 @@ INTENT_DESCRIPTIONS: dict[str, str] = {
 ALLOWED_INTENTS: tuple[str, ...] = tuple(INTENT_DESCRIPTIONS.keys())
 DEFAULT_FALLBACK_INTENT: IntentType = IntentType.ADMISSION_POLICY
 
-# intent -> vector collection name
-INTENT_COLLECTION_MAP: dict[str, str] = {
-    IntentType.SCHOOL_OVERVIEW.value: "school_overview",
-    IntentType.ADMISSION_POLICY.value: "admission_policy",
-    IntentType.MAJOR_AND_TRAINING.value: "majors_and_training",
-    IntentType.CAREER_AND_DEVELOPMENT.value: "",
-    IntentType.CAMPUS_LIFE.value: "",
-}
+# 所有意图共用的单一 collection 名称
+COLLECTION_NAME: str = "sustc_enrollment"
 
 CONFIDENCE_THRESHOLD: float = float(os.getenv("INTENT_CONFIDENCE_THRESHOLD", "0.55"))
 

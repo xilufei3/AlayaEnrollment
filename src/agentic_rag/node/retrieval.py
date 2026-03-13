@@ -9,7 +9,7 @@ from alayaflow.utils.logger import AlayaFlowLogger
 from packages.retriever.service import RetrieverService
 from packages.vector_store.models import SearchHit
 
-from ...config import INTENT_COLLECTION_MAP
+from ...config import COLLECTION_NAME
 from ..schemas import RAGState, SearchPlan
 
 
@@ -47,12 +47,11 @@ def create_retrieval_node(*, retriever: RetrieverService, top_k: int = 8):
         plan: SearchPlan = state.get("search_plan") or {}
         retrieval_query = str(plan.get("vector_query") or "").strip() or query
 
-        collection = INTENT_COLLECTION_MAP.get(intent, "")
-        if not retrieval_query or not collection:
+        collection = COLLECTION_NAME
+        if not retrieval_query:
             logger.debug(
                 "Retrieval skipped.\n"
                 f"query_empty={not retrieval_query}\n"
-                f"collection_empty={not collection}\n"
                 f"intent={intent}"
             )
             return {"vector_chunks": [], "structured_results": []}
