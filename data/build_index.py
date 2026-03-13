@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from .config import (
-    DIR_TO_COLLECTION,
+    COLLECTION_NAME,
     ENV_FILE,
     get_milvus_token,
     get_milvus_uri,
@@ -51,7 +51,7 @@ def main() -> int:
     load_dotenv(args.env_file)
 
     if args.all:
-        collections = list(DIR_TO_COLLECTION.values())
+        collections = [COLLECTION_NAME]
     elif args.collections:
         collections = list(dict.fromkeys(args.collections))
     else:

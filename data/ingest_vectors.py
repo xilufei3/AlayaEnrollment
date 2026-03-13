@@ -1,11 +1,12 @@
 """
-一次导入一个子目录到对应 collection，使用 CollectionService。
+一次导入一个子目录到统一 collection，使用 CollectionService。
+所有子目录（admission_policy / majors_and_training / school_overview）默认写入同一个 collection。
 
 用法（在仓库根目录执行）:
   python -m data.ingest_vectors --dir admission_policy
   python -m data.ingest_vectors --dir majors_and_training
   python -m data.ingest_vectors --dir school_overview
-  python -m data.ingest_vectors --dir admission_policy --collection my_admission
+  python -m data.ingest_vectors --dir admission_policy --collection my_custom_collection
 """
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ def _gather_files(data_root: Path, dir_name: str) -> list[Path]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="将 data 下指定子目录的文件导入向量库（一个目录对应一个 collection）"
+        description="将 data 下指定子目录的文件导入向量库（所有目录默认写入同一个 collection）"
     )
     parser.add_argument(
         "--dir",

@@ -11,15 +11,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"
 
-# 子目录名 -> collection 名称（一次导入一个目录到一个 collection）
-DIR_TO_COLLECTION: dict[str, str] = {
-    "admission_policy": "admission_policy",
-    "majors_and_training": "majors_and_training",
-    "school_overview": "school_overview",
-}
+# 所有子目录统一写入的 collection 名称
+COLLECTION_NAME: str = "sustc_enrollment"
 
 # 支持的子目录列表（用于校验）
-SUPPORTED_DIRS = list(DIR_TO_COLLECTION)
+SUPPORTED_DIRS: list[str] = [
+    "admission_policy",
+    "majors_and_training",
+    "school_overview",
+    "sustech_rag_markdown_clean",
+]
 
 # .env 路径
 ENV_FILE = REPO_ROOT / ".env"
@@ -53,8 +54,8 @@ def get_etl_url() -> str:
 
 
 def get_collection_for_dir(dir_name: str) -> str:
-    """子目录名对应的 collection 名；未配置时返回 dir_name。"""
-    return DIR_TO_COLLECTION.get(dir_name, dir_name)
+    """返回统一 collection 名称。"""
+    return COLLECTION_NAME
 
 
 # ETL/分片默认（可按需在 .env 或此处改）
