@@ -43,11 +43,13 @@ def register_runtime_models(
     intent_model_id: str = "deepseek-intent",
     generation_model_id: str = "deepseek-chat",
     rerank_model_id: str = "jina-reranker",
+    qwen_model_id: str = "qwen3-chat",
 ) -> Tuple[str, str]:
     load_dotenv_file(env_file)
 
     chat_model_api_key = os.getenv("DEEPSEEK_API_KEY")
     jina_api_key = os.getenv("JINA_API_KEY")
+    qwen_api_key = os.getenv("QWEN_API_KEY")
 
     if not chat_model_api_key:
         raise ValueError("Missing env: DEEPSEEK_API_KEY")
@@ -90,6 +92,14 @@ def register_runtime_models(
                 "model_name": os.getenv("JINA_MODEL_NAME", "jina-reranker-v3"),
                 "base_url": os.getenv("JINA_BASE_URL", "null"),
                 "api_key": jina_api_key,
+            },
+            {
+                "name": "Qwen3 Chat",
+                "model_id": qwen_model_id,
+                "provider_name": "OpenAI",
+                "model_name": "qwen3",
+                "base_url": os.getenv("QWEN_BASE_URL", "http://star.sustech.edu.cn/service/model/qwen35/v1"),
+                "api_key": qwen_api_key or "placeholder",
             },
         ],
         overwrite=True,
