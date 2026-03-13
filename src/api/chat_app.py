@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Annotated, Any, Iterator
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
@@ -47,12 +47,12 @@ class ThreadHistoryRequest(BaseModel):
 class RunStreamRequest(BaseModel):
     """LangGraph SDK compat: accepts both snake_case and camelCase."""
     input: Any | None = None
-    stream_mode: str | list[str] | None = Field(None, alias="streamMode")
+    stream_mode: Annotated[str | list[str] | None, Field(alias="streamMode")] = None
     stream_subgraphs: bool | None = None
     stream_resumable: bool | None = None
-    assistant_id: str | None = Field(None, alias="assistantId")
+    assistant_id: Annotated[str | None, Field(alias="assistantId")] = None
     checkpoint: dict[str, Any] | None = None
-    checkpoint_id: str | None = Field(None, alias="checkpointId")
+    checkpoint_id: Annotated[str | None, Field(alias="checkpointId")] = None
     config: dict[str, Any] | None = None
     context: dict[str, Any] | None = None
     command: dict[str, Any] | None = None
