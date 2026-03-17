@@ -71,8 +71,8 @@ SLOT_CLARIFY_PROMPTS: dict[str, str] = {
     "year": "请问您想咨询哪一年的招生政策？",
 }
 
-RERANK_MODEL_ID: str = os.getenv("RERANK_MODEL_ID", "jina-reranker")
+RERANK_MODEL_ID: str = os.getenv("RERANK_MODEL_ID", "rerank")
 RERANK_TOP_N: int = int(os.getenv("RERANK_TOP_N", "5"))
 
 # 对话历史：提取最近 k 轮（每轮=1 条用户+1 条助手），供后续节点使用
-HISTORY_LAST_K_TURNS: int = int(os.getenv("HISTORY_LAST_K_TURNS", "6"))
+HISTORY_LAST_K_TURNS: int = int(os.getenv("HISTORY_LAST_K_TURNS", "2"))

@@ -5,10 +5,10 @@ from typing import Any
 
 from langchain_core.documents import Document
 
-from alayaflow.component.model import ModelManager
 from alayaflow.utils.logger import AlayaFlowLogger
 
 from ...config import REQUIRED_SLOTS_BY_INTENT
+from ...node.model_provider import get_model
 from ..schemas import RAGState
 
 
@@ -44,7 +44,6 @@ def _chunk_summary(chunks: list[Document], max_chars: int = 800) -> str:
 class SufficiencyEvaluator:
     def __init__(self, *, model_id: str) -> None:
         self.model_id = model_id
-        self._model_manager = ModelManager()
 
     def evaluate(
         self,
@@ -103,7 +102,7 @@ class SufficiencyEvaluator:
         slots: dict[str, str],
         chunks: list[Document],
     ) -> dict[str, Any]:
-        model = self._model_manager.get_model(self.model_id)
+        model = get_model(self.model_id)
         user_prompt = (
             f"用户问题：{query}\n"
             f"意图：{intent}\n"
@@ -133,9 +132,7 @@ class SufficiencyEvaluator:
 
 
 def create_sufficiency_eval_node(*, model_id: str | None = None):
-    evaluator: SufficiencyEvaluator | None = None
-    if model_id:
-        evaluator = SufficiencyEvaluator(model_id=model_id)
+    evaluator = SufficiencyEvaluator(model_id=model_id or "eval")
 
     def sufficiency_eval_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
@@ -152,15 +149,6 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
                 "eval_result": "sufficient",
                 "missing_slots": [],
                 "eval_reason": "max_iterations reached",
-            }
-
-        if evaluator is None:
-            # 无 LLM，规则式兜底
-            result = "sufficient" if chunks else "insufficient_docs"
-            return {
-                "eval_result": result,
-                "missing_slots": [],
-                "eval_reason": "no eval model, rule-based",
             }
 
         result = evaluator.evaluate(query=query, intent=intent, slots=slots, chunks=chunks)

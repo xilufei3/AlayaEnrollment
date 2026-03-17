@@ -4,8 +4,9 @@ import json
 
 from pydantic import BaseModel, Field
 
-from alayaflow.component.model import ModelManager
 from alayaflow.utils.logger import AlayaFlowLogger
+
+from ...node.model_provider import get_model
 
 from ..schemas import RAGState, SearchPlan
 
@@ -82,7 +83,7 @@ def _llm_plan(
     eval_reason: str,
 ) -> SearchPlan:
     """调用 LLM 生成检索参数，策略固定为 vector_keyword_hybrid。"""
-    model = ModelManager().get_model(model_id)
+    model = get_model(model_id)
     user_parts = [
         f"用户问题：{query}",
         f"意图：{intent}",
@@ -136,10 +137,12 @@ def create_search_planner_node(*, model_id: str | None = None):
         iteration = int(state.get("rag_iteration") or 0)
         eval_reason = str(state.get("eval_reason") or "")
 
-        if model_id and query:
+        planner_model_kind = model_id or "planner"
+
+        if query:
             try:
                 plan = _llm_plan(
-                    model_id=model_id,
+                    model_id=planner_model_kind,
                     query=query,
                     intent=intent,
                     slots=slots,

@@ -47,21 +47,19 @@ def create_graph(
 
     vector_top_k = int(init_args.get("vector_top_k", 8))
     rag_max_iterations = int(init_args.get("rag_max_iterations", 2))
-    intent_model_id = init_args.get("intent_model_id")
-    generation_model_id = init_args.get("generation_model_id")
     g = StateGraph(WorkflowState)
-    g.add_node("intent_classify", create_intent_classify_node(model_id=intent_model_id))
+    g.add_node("intent_classify", create_intent_classify_node())
     g.add_node(
         "agentic_rag",
         create_agentic_rag_node(
             retriever=retriever,
             top_k=vector_top_k,
             max_iterations=rag_max_iterations,
-            eval_model_id=intent_model_id,
-            search_planner_model_id=intent_model_id,
+            eval_model_id="eval",
+            search_planner_model_id="planner",
         ),
     )
-    g.add_node("generate", create_generation_node(model_id=generation_model_id))
+    g.add_node("generate", create_generation_node(model_id="generation"))
 
     g.add_edge(START, "intent_classify")
     g.add_conditional_edges(

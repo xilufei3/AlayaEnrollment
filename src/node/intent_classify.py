@@ -9,9 +9,9 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
-from alayaflow.component.model import ModelManager
 from alayaflow.utils.logger import AlayaFlowLogger
 
+from .model_provider import get_model
 from ..config import (
     ALLOWED_INTENTS,
     DEFAULT_FALLBACK_INTENT,
@@ -70,7 +70,6 @@ def get_missing_slots_for_intent(intent: str, slots: dict[str, str]) -> list[str
 class EnrollmentIntentClassifier:
     def __init__(self, *, model_id: str | None = None) -> None:
         self.model_id = model_id
-        self._model_manager = ModelManager()
         self._parser = JsonOutputParser(pydantic_object=IntentClassificationResult)
         self._prompt = ChatPromptTemplate.from_template(INTENT_PROMPT_TEMPLATE)
 
@@ -88,11 +87,8 @@ class EnrollmentIntentClassifier:
         conversation_context: Sequence[Any] = (),
         model_id: str | None = None,
     ) -> IntentClassificationResult:
-        active_model_id = model_id or self.model_id
-        if not active_model_id:
-            raise ValueError("intent classify model_id is required")
-
-        model = self._model_manager.get_model(active_model_id)
+        active_model_kind = model_id or self.model_id or "intent"
+        model = get_model(active_model_kind)
         system_prompt = self._prompt.format_prompt(
             intent_descriptions=json.dumps(INTENT_DESCRIPTIONS, ensure_ascii=False, indent=2),
             slot_descriptions=json.dumps(SLOT_DESCRIPTIONS, ensure_ascii=False, indent=2),
@@ -238,12 +234,14 @@ def create_intent_classify_node(*, model_id: str | None = None):
                 f"fallback_intent={intent}"
             )
 
-        missing_slots = get_missing_slots_for_intent(intent, slots)
+        merged_slots = dict(state.get("slots") or {})
+        merged_slots.update(slots)
+        missing_slots = get_missing_slots_for_intent(intent, merged_slots)
         return {
             "query": query,
             "intent": intent,
             "confidence": confidence,
-            "slots": slots,
+            "slots": merged_slots,
             "missing_slots": missing_slots,
         }
 

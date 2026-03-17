@@ -14,7 +14,8 @@ from pymilvus import MilvusClient
 from packages.alayadata.client import AlayaDataClient
 from packages.retriever.service import RetrieverService
 from packages.vector_store.milvus_store import MilvusVectorStore
-from ..node.runtime_resources import bootstrap_runtime_dirs, load_dotenv_file, register_runtime_models
+from ..knowledge import SQLManager, SystemDB
+from ..node.runtime_resources import bootstrap_runtime_dirs, load_dotenv_file
 from .thread_registry import ThreadRegistry
 
 
@@ -90,8 +91,6 @@ def _create_retriever(env_file: Path | str | None = None) -> tuple[MilvusVectorS
     # support both naming conventions: AlayaData_URL (current .env) and ETL_SERVER_URL (legacy)
     etl_url = (
         os.getenv("AlayaData_URL")
-        or os.getenv("ETL_SERVER_URL")
-        or "http://localhost:6000"
     )
 
     milvus_client = MilvusClient(uri=milvus_uri, token=milvus_token, db_name=milvus_db)
@@ -174,11 +173,6 @@ class AdmissionGraphRuntime:
         self.runtime_root = bootstrap_runtime_dirs(self.cfg.repo_root, runtime_name=self.cfg.runtime_name)
         from ..graph import create_graph
 
-        intent_model_id, generation_model_id = register_runtime_models(
-            runtime_root=self.runtime_root,
-            env_file=self.cfg.env_file,
-        )
-
         self._vector_store, retriever = _create_retriever(self.cfg.env_file)
         checkpoint_path = self.cfg.checkpoint_path or (self.runtime_root / "checkpoints.sqlite")
         self._checkpointer, self._checkpointer_cm = _load_sqlite_checkpointer(checkpoint_path)
@@ -201,11 +195,21 @@ class AdmissionGraphRuntime:
                 "retriever": retriever,
                 "vector_top_k": self.cfg.vector_top_k,
                 "rag_max_iterations": self.cfg.rag_max_iterations,
-                "intent_model_id": intent_model_id,
-                "generation_model_id": generation_model_id,
             },
             checkpointer=self._checkpointer,
         )
+
+        # 初始化系统数据库（会话 & 消息记录）
+        SystemDB()
+
+        # 初始化业务结构化数据管理器（registry 不存在时跳过，不影响启动）
+        try:
+            SQLManager()
+        except Exception as _sql_err:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "SQLManager 初始化跳过（table_registry 未配置或数据库不可用）：%s", _sql_err
+            )
 
     def shutdown(self) -> None:
         if self._vector_store is not None and hasattr(self._vector_store, "close"):

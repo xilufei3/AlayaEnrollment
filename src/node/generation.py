@@ -6,12 +6,11 @@ from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.runtime import Runtime
 
-from alayaflow.component.model import ModelManager
 from alayaflow.utils.logger import AlayaFlowLogger
 
 from ..config import HISTORY_LAST_K_TURNS
 from ..schemas import WorkflowState
-
+from .model_provider import get_model
 
 logger = AlayaFlowLogger()
 
@@ -79,7 +78,6 @@ _NO_RETRIEVAL_SUFFIX = (
 class GenerationComponent:
     def __init__(self, *, model_id: str | None = None) -> None:
         self.model_id = model_id
-        self._model_manager = ModelManager()
 
     @staticmethod
     def _to_text(content: Any) -> str:
@@ -176,11 +174,9 @@ class GenerationComponent:
         model_id: str | None = None,
     ) -> str:
         """单轮短回复，用于缺槽位追问、out_of_scope 等场景。"""
-        active_model_id = model_id or self.model_id
-        if not active_model_id:
-            return ""
+        active_model_kind = model_id or self.model_id or "generation"
         try:
-            model = self._model_manager.get_model(active_model_id)
+            model = get_model(active_model_kind)
             response = model.invoke([
                 ("system", system_prompt),
                 ("user", user_prompt),
@@ -199,11 +195,8 @@ class GenerationComponent:
         model_id: str | None = None,
         system_suffix: str = "",
     ) -> str:
-        active_model_id = model_id or self.model_id
-        if not active_model_id:
-            raise ValueError("generation model_id is required")
-
-        model = self._model_manager.get_model(active_model_id)
+        active_model_kind = model_id or self.model_id or "generation"
+        model = get_model(active_model_kind)
         chunk_texts = self._chunk_texts(chunks)
         has_context = bool(chunk_texts)
         context = "\n".join(chunk_texts) if has_context else "（无检索文档）"

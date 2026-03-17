@@ -4,10 +4,10 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 from langchain_core.documents import Document
 
-from alayaflow.component.model import ModelManager
 from alayaflow.utils.logger import AlayaFlowLogger
 
 from ...config import RERANK_MODEL_ID, RERANK_TOP_N
+from ...node.model_provider import get_model
 from ..schemas import RAGState
 
 
@@ -18,7 +18,6 @@ class JinaRerankerComponent:
     def __init__(self, *, model_id: str, top_n: Optional[int] = None) -> None:
         self.model_id = model_id
         self.top_n = top_n
-        self._model_manager = ModelManager()
 
     def _to_documents(
         self,
@@ -43,7 +42,7 @@ class JinaRerankerComponent:
         bind_kwargs: Dict[str, Any] = {}
         if self.top_n is not None:
             bind_kwargs["top_n"] = int(self.top_n)
-        return self._model_manager.get_model(self.model_id, runtime_config=bind_kwargs)
+        return get_model(self.model_id, **bind_kwargs)
 
     def __call__(
         self,

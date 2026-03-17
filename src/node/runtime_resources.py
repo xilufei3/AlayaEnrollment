@@ -40,8 +40,8 @@ def register_runtime_models(
     *,
     runtime_root: Path,
     env_file: str | Path | None = None,
-    intent_model_id: str = "deepseek-intent",
-    generation_model_id: str = "deepseek-chat",
+    intent_model_id: str = "qwen3-chat",
+    generation_model_id: str = "qwen3-chat",
     rerank_model_id: str = "jina-reranker",
     qwen_model_id: str = "qwen3-chat",
 ) -> Tuple[str, str]:
@@ -51,10 +51,10 @@ def register_runtime_models(
     jina_api_key = os.getenv("JINA_API_KEY")
     qwen_api_key = os.getenv("QWEN_API_KEY")
 
-    if not chat_model_api_key:
-        raise ValueError("Missing env: DEEPSEEK_API_KEY")
     if not jina_api_key:
         raise ValueError("Missing env: JINA_API_KEY")
+    if not (chat_model_api_key or qwen_api_key):
+        raise ValueError("Missing env: 至少需要 DEEPSEEK_API_KEY 或 QWEN_API_KEY 之一")
 
     from alayaflow.api import Flow
 
@@ -66,23 +66,24 @@ def register_runtime_models(
             "logs_dir": str(runtime_root / "logs"),
         }
     )
+    # 注册时使用固定 model_id，便于按 id 取模型；返回的 intent/generation_model_id 决定图用哪个
     flow.register_models(
         [
             {
                 "name": "DeepSeek Intent",
-                "model_id": intent_model_id,
+                "model_id": "deepseek-intent",
                 "provider_name": "DeepSeek",
                 "model_name": "deepseek-chat",
                 "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
-                "api_key": chat_model_api_key,
+                "api_key": chat_model_api_key or "placeholder",
             },
             {
                 "name": "DeepSeek Chat",
-                "model_id": generation_model_id,
+                "model_id": "deepseek-chat",
                 "provider_name": "DeepSeek",
                 "model_name": "deepseek-chat",
                 "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
-                "api_key": chat_model_api_key,
+                "api_key": chat_model_api_key or "placeholder",
             },
             {
                 "name": "Jina Rerank",
@@ -100,6 +101,8 @@ def register_runtime_models(
                 "model_name": "qwen3",
                 "base_url": os.getenv("QWEN_BASE_URL", "http://star.sustech.edu.cn/service/model/qwen35/v1"),
                 "api_key": qwen_api_key or "placeholder",
+                # 默认非思考模式；AlayaFlow 若支持注册时 extra_body，则每次请求会带上
+                "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
             },
         ],
         overwrite=True,
