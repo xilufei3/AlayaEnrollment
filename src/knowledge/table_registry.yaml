@@ -1,0 +1,25 @@
+databases:
+  main_db:
+    type: sqlite
+    path: "./data/admissions.db"
+
+tables:
+  admission_scores:
+    db_id: "main_db"
+    description: "历年各省份综合评价录取分数线，包含最高分、平均分、最低分及对应位次"
+    use_when:
+      - "用户询问分数线、录取分、位次"
+      - "用户询问某省份历年录取情况"
+      - "用户想了解录取难度"
+    columns:
+      province:  "省份名称，如'广东'、'北京'"
+      year:      "年份，整数，范围2022-2024"
+      count:     "该省招生人数"
+      kcl_count: "KCL联合医学院招生人数，仅2024年有数据"
+      max_score: "最高录取分"
+      max_rank:  "最高录取位次"
+      avg_score: "平均录取分"
+      avg_rank:  "平均录取位次"
+      min_score: "最低录取分"
+      min_rank:  "最低录取位次（越小越好）"
+      note:      "备注信息"

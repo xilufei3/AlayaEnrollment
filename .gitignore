@@ -38,3 +38,4 @@ coverage/
 **/package-lock.json
 
 tests/*
+data/*
