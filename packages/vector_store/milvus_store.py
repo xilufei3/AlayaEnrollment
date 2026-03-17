@@ -238,6 +238,7 @@ class MilvusVectorStore(VectorStore):
             entity = dict(item.get("entity", {}))
             entity.pop("id", None)
             entity.pop("vector", None)
+            entity.pop(HYBRID_FIELD_SPARSE, None)
 
             hits.append(
                 SearchHit(
