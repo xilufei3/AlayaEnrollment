@@ -1,12 +1,9 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
-
-from alayaflow.utils.logger import AlayaFlowLogger
-
-from packages.retriever.service import RetrieverService
 
 from .node.rerank import create_rerank_node
 from .node.retrieval import create_retrieval_node
@@ -15,7 +12,7 @@ from .node.sufficiency_eval import create_sufficiency_eval_node
 from .schemas import RAGState
 
 
-logger = AlayaFlowLogger()
+logger = logging.getLogger(__name__)
 
 
 def _route_after_eval(state: RAGState) -> str:
@@ -45,7 +42,7 @@ def _route_after_eval(state: RAGState) -> str:
 
 
 def _compile_rag_graph(
-    retriever: RetrieverService,
+    retriever: Any,
     top_k: int,
     eval_model_id: str | None,
     search_planner_model_id: str | None = None,
@@ -75,7 +72,7 @@ def _compile_rag_graph(
 
 def create_agentic_rag_node(
     *,
-    retriever: RetrieverService,
+    retriever: Any,
     top_k: int = 8,
     max_iterations: int = 2,
     eval_model_id: str | None = None,

@@ -1,12 +1,8 @@
 """
 SystemDB
 ────────
-管理系统运行数据：会话与消息记录。
-Checkpoint（LangGraph 状态快照）由 LangGraph 自身管理，不在这里。
-
-配置：
-  - SYSTEM_DB_PATH  环境变量（可选）：覆盖默认数据库文件路径
-  - 默认路径：<repo_root>/.runtime/chat-api/system.db
+管理系统运行数据：会话、消息记录。
+Checkpoint 由 LangGraph 自己管，不在这里。
 """
 from __future__ import annotations
 
@@ -16,24 +12,14 @@ import os
 import threading
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
+from ..config.settings import config
+
 logger = logging.getLogger(__name__)
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_DEFAULT_DB_PATH = _REPO_ROOT / ".runtime" / "chat-api" / "system.db"
-
-
-def _resolve_db_path() -> Path:
-    env_path = os.getenv("SYSTEM_DB_PATH")
-    if env_path:
-        p = Path(env_path)
-        return p if p.is_absolute() else _REPO_ROOT / p
-    return _DEFAULT_DB_PATH
 
 
 class SystemDB:
@@ -59,9 +45,10 @@ class SystemDB:
             self._initialized = True
 
     def _setup(self) -> None:
-        db_path = _resolve_db_path()
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        db_uri = "sqlite:///" + str(db_path).replace("\\", "/")
+        db_path = os.path.abspath(config.db.system_db_path)
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        # 使用正斜杠，避免 Windows 下 \ 在 URL 中被转义
+        db_uri = "sqlite:///" + db_path.replace("\\", "/")
         self._engine = create_engine(
             db_uri,
             connect_args={"check_same_thread": False},
@@ -69,7 +56,7 @@ class SystemDB:
             pool_pre_ping=True,
         )
         self._migrate()
-        logger.info("SystemDB 初始化完成：%s", db_path)
+        logger.info("SystemDB 初始化完成")
 
     def _migrate(self) -> None:
         """建表，已存在则跳过"""
@@ -120,68 +107,10 @@ class SystemDB:
                 "id":      conversation_id,
                 "user_id": user_id,
                 "channel": channel,
-                "meta":    json.dumps(meta, ensure_ascii=False) if meta else None,
+                "meta":    json.dumps(meta) if meta else None,
             })
             conn.commit()
         return conversation_id
-
-    def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
-        """获取单条会话信息，不存在返回 None"""
-        with self._engine.connect() as conn:
-            result = conn.execute(text("""
-                SELECT * FROM conversations WHERE id = :id
-            """), {"id": conversation_id})
-            row = result.fetchone()
-            if row is None:
-                return None
-            cols = list(result.keys())
-            record = dict(zip(cols, row))
-            if record.get("meta"):
-                try:
-                    record["meta"] = json.loads(record["meta"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            return record
-
-    def list_conversations(
-        self,
-        *,
-        user_id: str | None = None,
-        channel: str | None = None,
-        status: str | None = None,
-        limit: int = 50,
-    ) -> list[dict[str, Any]]:
-        """列出会话，支持按 user_id / channel / status 过滤"""
-        clauses = ["1=1"]
-        params: dict[str, Any] = {"limit": limit}
-        if user_id is not None:
-            clauses.append("user_id = :user_id")
-            params["user_id"] = user_id
-        if channel is not None:
-            clauses.append("channel = :channel")
-            params["channel"] = channel
-        if status is not None:
-            clauses.append("status = :status")
-            params["status"] = status
-        where = " AND ".join(clauses)
-        with self._engine.connect() as conn:
-            result = conn.execute(text(f"""
-                SELECT * FROM conversations
-                WHERE {where}
-                ORDER BY updated_at DESC
-                LIMIT :limit
-            """), params)
-            cols = list(result.keys())
-            rows = []
-            for row in result.fetchall():
-                record = dict(zip(cols, row))
-                if record.get("meta"):
-                    try:
-                        record["meta"] = json.loads(record["meta"])
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                rows.append(record)
-            return rows
 
     def update_summary(self, conversation_id: str, summary: str) -> None:
         """更新会话摘要（由 summary_node 调用）"""
@@ -195,7 +124,6 @@ class SystemDB:
             conn.commit()
 
     def end_conversation(self, conversation_id: str) -> None:
-        """将会话标记为已结束"""
         with self._engine.connect() as conn:
             conn.execute(text("""
                 UPDATE conversations
@@ -218,7 +146,6 @@ class SystemDB:
         sql_hit: bool | None = None,
         latency_ms: int | None = None,
     ) -> None:
-        """记录一条消息"""
         with self._engine.connect() as conn:
             conn.execute(text("""
                 INSERT INTO messages (
@@ -241,7 +168,7 @@ class SystemDB:
             conn.commit()
 
     def get_messages(self, conversation_id: str) -> list[dict[str, Any]]:
-        """获取某会话的完整消息列表（按时间正序）"""
+        """获取某会话的完整消息列表"""
         with self._engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT * FROM messages
@@ -249,13 +176,4 @@ class SystemDB:
                 ORDER BY created_at ASC
             """), {"id": conversation_id})
             cols = list(result.keys())
-            rows = []
-            for row in result.fetchall():
-                record = dict(zip(cols, row))
-                if record.get("intents"):
-                    try:
-                        record["intents"] = json.loads(record["intents"])
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                rows.append(record)
-            return rows
+            return [dict(zip(cols, row)) for row in result.fetchall()]

@@ -1,17 +1,16 @@
 from __future__ import annotations
 
+import logging
 import json
 
 from pydantic import BaseModel, Field
 
-from alayaflow.utils.logger import AlayaFlowLogger
-
-from ...node.model_provider import get_model
+from ...llm import get_model
 
 from ..schemas import RAGState, SearchPlan
 
 
-logger = AlayaFlowLogger()
+logger = logging.getLogger(__name__)
 
 # 意图 → 默认检索 top_k（规则定义，与 LLM 无关）
 _INTENT_TOP_K: dict[str, int] = {
@@ -162,7 +161,7 @@ def create_search_planner_node(*, model_id: str | None = None):
             f"intent={intent}\n"
             f"iteration={iteration}\n"
             f"strategy={plan.get('strategy')}\n"
-            f"filters={plan.get('structured_filters')}\n"
+            f"vector_query={plan.get('vector_query', '')[:60]}\n"
             f"top_k={plan.get('top_k')}"
         )
         return {

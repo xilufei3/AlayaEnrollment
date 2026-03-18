@@ -1,18 +1,17 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Sequence
 
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.runtime import Runtime
 
-from alayaflow.utils.logger import AlayaFlowLogger
+from ...config.settings import HISTORY_LAST_K_TURNS
+from ..state import WorkflowState
+from ..llm import get_model
 
-from ..config import HISTORY_LAST_K_TURNS
-from ..schemas import WorkflowState
-from .model_provider import get_model
-
-logger = AlayaFlowLogger()
+logger = logging.getLogger(__name__)
 
 # ── 场景化 System Prompt（按意图分支）────────────────────────────────────────
 

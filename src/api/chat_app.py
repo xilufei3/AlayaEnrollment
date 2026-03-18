@@ -10,7 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from packages.vector_store.errors import VectorStoreError
+try:
+    from packages.vector_store.errors import VectorStoreError
+except ModuleNotFoundError:
+    class VectorStoreError(Exception):
+        """Compatibility fallback when the legacy packages module is absent."""
 from ..runtime.graph_runtime import AdmissionGraphRuntime, RuntimeConfig
 
 
@@ -47,12 +51,12 @@ class ThreadHistoryRequest(BaseModel):
 class RunStreamRequest(BaseModel):
     """LangGraph SDK compat: accepts both snake_case and camelCase."""
     input: Any | None = None
-    stream_mode: Annotated[str | list[str] | None, Field(alias="streamMode")] = None
+    stream_mode: Annotated[str | list[str] | None, Field(validation_alias="streamMode")] = None
     stream_subgraphs: bool | None = None
     stream_resumable: bool | None = None
-    assistant_id: Annotated[str | None, Field(alias="assistantId")] = None
+    assistant_id: Annotated[str | None, Field(validation_alias="assistantId")] = None
     checkpoint: dict[str, Any] | None = None
-    checkpoint_id: Annotated[str | None, Field(alias="checkpointId")] = None
+    checkpoint_id: Annotated[str | None, Field(validation_alias="checkpointId")] = None
     config: dict[str, Any] | None = None
     context: dict[str, Any] | None = None
     command: dict[str, Any] | None = None

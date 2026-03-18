@@ -1,17 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from langchain_core.documents import Document
 
-from alayaflow.utils.logger import AlayaFlowLogger
-
-from ...config import RERANK_MODEL_ID, RERANK_TOP_N
-from ...node.model_provider import get_model
+from ....config.settings import config
+from ...llm import get_model
 from ..schemas import RAGState
 
-
-logger = AlayaFlowLogger()
+logger = logging.getLogger(__name__)
 
 
 class JinaRerankerComponent:
@@ -86,7 +84,7 @@ def create_rerank_node():
             return {"chunks": chunks}
 
         try:
-            reranker = JinaRerankerComponent(model_id=RERANK_MODEL_ID, top_n=RERANK_TOP_N)
+            reranker = JinaRerankerComponent(model_id=config.rerank.model_id, top_n=config.rerank.top_n)
             reranked = reranker(query=query, docs=chunks)
             logger.debug(f"Rerank done. in={len(chunks)} out={len(reranked)}")
             return {"chunks": reranked}

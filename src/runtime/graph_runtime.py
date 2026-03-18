@@ -9,13 +9,9 @@ from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
 
-from pymilvus import MilvusClient
-
-from packages.alayadata.client import AlayaDataClient
-from packages.retriever.service import RetrieverService
-from packages.vector_store.milvus_store import MilvusVectorStore
 from ..knowledge import SQLManager, SystemDB
-from ..node.runtime_resources import bootstrap_runtime_dirs, load_dotenv_file
+from ..knowledge.vector_manager import VectorManager
+from ..graph.node.runtime_resources import bootstrap_runtime_dirs, load_dotenv_file
 from .thread_registry import ThreadRegistry
 
 
@@ -82,22 +78,10 @@ class RuntimeConfig:
     checkpoint_path: Path | None = None
 
 
-def _create_retriever(env_file: Path | str | None = None) -> tuple[MilvusVectorStore, RetrieverService]:
-    """Construct MilvusVectorStore + AlayaDataClient and wrap in RetrieverService."""
+def _create_retriever(env_file: Path | str | None = None) -> VectorManager:
+    """Construct the injected vector search backend used by the graph."""
     load_dotenv_file(env_file)
-    milvus_uri = os.getenv("MILVUS_URI", "http://localhost:19530")
-    milvus_token = os.getenv("MILVUS_TOKEN") or ""
-    milvus_db = os.getenv("MILVUS_DB_NAME") or "default"
-    # support both naming conventions: AlayaData_URL (current .env) and ETL_SERVER_URL (legacy)
-    etl_url = (
-        os.getenv("AlayaData_URL")
-    )
-
-    milvus_client = MilvusClient(uri=milvus_uri, token=milvus_token, db_name=milvus_db)
-    vector_store = MilvusVectorStore(milvus_client)
-    alaya_client = AlayaDataClient(base_url=etl_url)
-    retriever = RetrieverService(store=vector_store, alaya_client=alaya_client)
-    return vector_store, retriever
+    return VectorManager()
 
 
 def _load_sqlite_checkpointer(db_path: Path) -> tuple[Any, Any | None]:
@@ -173,7 +157,8 @@ class AdmissionGraphRuntime:
         self.runtime_root = bootstrap_runtime_dirs(self.cfg.repo_root, runtime_name=self.cfg.runtime_name)
         from ..graph import create_graph
 
-        self._vector_store, retriever = _create_retriever(self.cfg.env_file)
+        retriever = _create_retriever(self.cfg.env_file)
+        self._vector_store = retriever
         checkpoint_path = self.cfg.checkpoint_path or (self.runtime_root / "checkpoints.sqlite")
         self._checkpointer, self._checkpointer_cm = _load_sqlite_checkpointer(checkpoint_path)
         self._thread_registry = ThreadRegistry(self.runtime_root / "thread_registry.sqlite")

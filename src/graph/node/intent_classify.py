@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import json
 from typing import Any, Sequence
 
@@ -9,10 +10,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
-from alayaflow.utils.logger import AlayaFlowLogger
-
-from .model_provider import get_model
-from ..config import (
+from ..llm import get_model
+from ...config.settings import (
     ALLOWED_INTENTS,
     DEFAULT_FALLBACK_INTENT,
     HISTORY_LAST_K_TURNS,
@@ -20,10 +19,10 @@ from ..config import (
     REQUIRED_SLOTS_BY_INTENT,
     SLOT_DESCRIPTIONS,
 )
-from ..schemas import WorkflowState
+from ..state import WorkflowState
 
 
-logger = AlayaFlowLogger()
+logger = logging.getLogger(__name__)
 
 INTENT_PROMPT_TEMPLATE = """
 你是南科大招生咨询智能体的意图分类与槽位抽取模块。

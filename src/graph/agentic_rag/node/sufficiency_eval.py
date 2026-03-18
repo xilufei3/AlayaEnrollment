@@ -1,18 +1,16 @@
 from __future__ import annotations
 
+import logging
 import json
 from typing import Any
 
 from langchain_core.documents import Document
 
-from alayaflow.utils.logger import AlayaFlowLogger
-
-from ...config import REQUIRED_SLOTS_BY_INTENT
-from ...node.model_provider import get_model
+from ....config.settings import REQUIRED_SLOTS_BY_INTENT
+from ...llm import get_model
 from ..schemas import RAGState
 
-
-logger = AlayaFlowLogger()
+logger = logging.getLogger(__name__)
 
 _EVAL_SYSTEM_PROMPT = """你是一个检索质量评估器。
 根据用户问题和检索到的文档，判断当前检索结果的充分性。
