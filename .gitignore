@@ -2,20 +2,28 @@
 .env
 .env.local
 
-# Runtime / 运行时生成（勿提交）
+# Runtime state
 .runtime/
-AlayaFlow/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+*.log
+.coverage
+data/db/
+data/bm25_state/
+htmlcov/
 
-# Milvus / Docker 卷数据（etcd、minio、milvus 等）
+# Local data files
+data/raw/
+
+# Milvus / Docker volumes
 infra/milvus/volumes_clean/
 infra/**/volumes_*/
 infra/**/volumes/
 
 # IDE
 .vscode/
+.claude/
 
 # Python artifacts
 __pycache__/
@@ -30,12 +38,10 @@ venv/
 node_modules/
 .next/
 .turbo/
+*.tsbuildinfo
 dist/
 build/
 coverage/
 
-# This repo uses pnpm; avoid npm lockfile noise
+# Package manager noise
 **/package-lock.json
-
-tests/*
-data/*

@@ -1,92 +1,169 @@
 # AlayaEnrollment
 
-本仓库是本地 Alaya Agent 的单仓项目，主要包含：
-- Python 后端运行时与聊天 API
-- Next.js 前端聊天界面
-- 向量检索包与 Milvus 基础设施配置
+招生问答项目，包含：
 
-## 目录结构
+- FastAPI 后端服务
+- LangGraph 对话编排
+- Milvus 向量检索
+- `web/` 前端页面
 
-```text
-AlayaEnrollment/
-  apps/
-    agent-chat-app/         # 前端工作区（web + agents）
-  infra/
-    docker/
-      milvus-compose.yml
-  packages/
-    vector_store/           # Python 向量存储包
-  src/
-    api/chat_app.py         # FastAPI 入口
-    runtime/graph_runtime.py
-  .env                      # 项目统一环境变量（本地）
-  .env.example              # 环境变量模板
+## 本地部署
+
+### 1. 环境准备
+
+需要先安装：
+
+- Python
+- Node.js
+- Docker / Docker Desktop
+
+### 2. 配置环境变量
+
+将 `.env.example` 复制为 `.env`，并至少检查这些变量：
+
+- `AlayaData_URL`
+- `MILVUS_URI`
+- `EMBED_DIM`
+- `DEEPSEEK_API_KEY` 或 `QWEN_API_KEY`
+
+示例：
+
+```bash
+cp .env.example .env
 ```
 
-## 环境变量
-
-本项目统一使用仓库根目录环境文件：
-- `D:\AlayaEnrollment\.env`
-
-模板文件：
-- `D:\AlayaEnrollment\.env.example`
-
-首次可先复制模板：
+PowerShell 可用：
 
 ```powershell
-cd D:\AlayaEnrollment
 Copy-Item .env.example .env
 ```
 
-## 启动后端
+### 3. 启动后端
 
-```powershell
-cd D:\AlayaEnrollment
-python -m uvicorn src.api.chat_app:app --reload --host 0.0.0.0 --port 8008
+启动 Milvus 及 API：
+
+```bash
+python main.py
 ```
+
+如果只启动 API：
+
+```bash
+python main.py --skip-infra
+```
+
+默认端口：
+
+- API: `http://localhost:8008`
+- Attu: `http://localhost:8000`
+- Milvus: `localhost:19530`
 
 健康检查：
 
-```powershell
+```bash
 curl http://localhost:8008/health
 ```
 
-## 启动前端
+### 4. 启动前端
 
-在前端工作区安装并启动：
+开发模式：
 
-```powershell
-cd D:\AlayaEnrollment\apps\agent-chat-app
-pnpm install
-pnpm dev
-```
-
-仅启动 web（pnpm）：
-
-```powershell
-cd D:\AlayaEnrollment\apps\agent-chat-app
-pnpm --filter web dev
-```
-
-仅启动 web（npm）：
-
-```powershell
-cd D:\AlayaEnrollment\apps\agent-chat-app\apps\web
+```bash
+cd web
 npm install
 npm run dev
 ```
 
-## 说明
+生产模式：
 
-- 根目录 `.env` 同时用于后端运行时和前端默认配置。
-- `AlayaFlow/` 目录当前不纳入本仓库版本管理（已忽略）。
+```bash
+cd web
+npm install
+npm run build
+npm run start
+```
 
-## Additional Docs
+默认地址：
 
-完整文档请查看 **[docs/README.md](docs/README.md)**，包括：
+- `http://localhost:3000`
 
-- [部署指南](docs/deployment.md) — 环境、Milvus、后端与前端部署
-- [使用指南](docs/usage.md) — 聊天 API、前端使用、环境变量
-- [数据导入](docs/data-import.md) — AlayaData → Milvus 导入流程与 CLI
-- [AlayaData → Milvus 导入说明](docs/milvus-ingestion-guide.md) — 详细组件与故障排查
-- [系统架构与 Milvus 层次](docs/system-architecture-milvus-layers.md) — 插入/检索链路设计
+## 数据导入与检索
+
+导入整个目录：
+
+```bash
+python -m script.ingest_all --dir ./data/raw/unstructured
+```
+
+导入单个文件：
+
+```bash
+python -m script.ingest_file --file ./data/raw/unstructured/本科专业.md --category major
+```
+
+检索验证：
+
+```bash
+python -m script.demo_vector_search --query "本科专业" --top-k 3
+```
+
+## 服务器部署
+
+适用于单机部署场景，默认后端 `8008`、前端 `3000`。
+
+### 1. 拉取代码并配置环境变量
+
+```bash
+git clone <your-repo-url>
+cd AlayaEnrollment
+cp .env.example .env
+```
+
+### 2. 启动后端
+
+前台启动：
+
+```bash
+python main.py --host 0.0.0.0 --port 8008
+```
+
+后台启动：
+
+```bash
+mkdir -p .runtime
+nohup python main.py --host 0.0.0.0 --port 8008 > .runtime/backend.log 2>&1 &
+```
+
+### 3. 启动前端
+
+```bash
+cd web
+npm install
+npm run build
+mkdir -p ../.runtime
+nohup npm run start -- --hostname 0.0.0.0 --port 3000 > ../.runtime/frontend.log 2>&1 &
+```
+
+### 4. 导入知识库
+
+```bash
+cd ..
+python -m script.ingest_all --dir ./data/raw/unstructured
+```
+
+### 5. 验证服务
+
+```bash
+curl http://127.0.0.1:8008/health
+curl http://127.0.0.1:3000
+python -m script.demo_vector_search --query "本科专业" --top-k 3
+```
+
+## 推荐顺序
+
+```bash
+cp .env.example .env
+python main.py
+python -m script.ingest_all --dir ./data/raw/unstructured
+python -m script.demo_vector_search --query "本科专业" --top-k 3
+```
