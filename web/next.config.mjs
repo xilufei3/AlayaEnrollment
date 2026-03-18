@@ -1,9 +1,12 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+
+const webDir = path.dirname(fileURLToPath(import.meta.url));
 
 // Keep a single source of truth for env values at repo root: D:/AlayaEnrollment/.env
 dotenv.config({
-  path: path.resolve(process.cwd(), "../../../../.env"),
+  path: path.resolve(webDir, "../.env"),
 });
 
 /** @type {import('next').NextConfig} */
