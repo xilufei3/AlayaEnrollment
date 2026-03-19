@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage
@@ -22,6 +22,7 @@ class WorkflowState(TypedDict, total=False):
 
     # Retrieval + generation
     chunks: list[Document]
+    structured_results: list[dict[str, Any]]
     citations: list[dict[str, str]]
     retrieval_skipped: bool
 

@@ -67,7 +67,7 @@ def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
                 f"query_empty={not retrieval_query}\n"
                 f"intent={intent}"
             )
-            return {"vector_chunks": [], "structured_results": [], "chunks": []}
+            return {"vector_chunks": []}
 
         plan_top_k = int(plan.get("top_k") or top_k)
         search_mode = _resolve_search_mode(plan)
@@ -94,8 +94,6 @@ def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
         docs = _deduplicate(docs)
         return {
             "vector_chunks": docs,
-            "structured_results": [],
-            "chunks": docs,
         }
 
     return retrieval_node

@@ -135,6 +135,13 @@ class GenerationComponent:
                 lines.append(f"[{i}] {text}")
         return lines
 
+    @staticmethod
+    def _structured_results_text(rows: Sequence[dict[str, Any]]) -> str:
+        lines: list[str] = []
+        for i, row in enumerate(rows[:6], start=1):
+            lines.append(f"[SQL {i}] {row}")
+        return "\n".join(lines)
+
     @classmethod
     def _history_text(cls, messages: Sequence[Any], max_turns: int = 6) -> str:
         rows: list[str] = []
@@ -190,6 +197,7 @@ class GenerationComponent:
         query: str,
         intent: str,
         chunks: Sequence[Any],
+        structured_results: Sequence[dict[str, Any]] | None = None,
         messages: Sequence[Any] | None = None,
         model_id: str | None = None,
         system_suffix: str = "",
@@ -197,8 +205,11 @@ class GenerationComponent:
         active_model_kind = model_id or self.model_id or "generation"
         model = get_model(active_model_kind)
         chunk_texts = self._chunk_texts(chunks)
+        structured_text = self._structured_results_text(list(structured_results or []))
         has_context = bool(chunk_texts)
         context = "\n".join(chunk_texts) if has_context else "（无检索文档）"
+        if structured_text:
+            context = f"{context}\n\nSQL structured results:\n{structured_text}"
         history = self._history_text(messages or [])
 
         system_prompt = _SYSTEM_PROMPTS.get(intent, _DEFAULT_SYSTEM_PROMPT)
@@ -308,6 +319,7 @@ def create_generation_node(*, model_id: str | None = None):
                         query=query,
                         intent=intent,
                         chunks=chunks_for_missing,
+                        structured_results=list(state.get("structured_results") or []),
                         messages=messages_for_history,
                         model_id=runtime_model_id,
                         system_suffix=suffix,
@@ -371,6 +383,7 @@ def create_generation_node(*, model_id: str | None = None):
                 query=query,
                 intent=intent,
                 chunks=chunks,
+                structured_results=list(state.get("structured_results") or []),
                 messages=messages_for_history,
                 model_id=runtime_model_id,
             )

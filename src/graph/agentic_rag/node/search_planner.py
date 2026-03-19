@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import logging
 import json
+import logging
 
 from pydantic import BaseModel, Field
 
 from ...llm import get_model
-
-from ..schemas import RAGState, SearchPlan
-
+from ..schemas import RAGState, SQLPlan, SearchPlan
 
 logger = logging.getLogger(__name__)
 
-# 意图 → 默认检索 top_k（规则定义，与 LLM 无关）
+# 意图 -> 默认检索 top_k（规则定义，与 LLM 无关）
 _INTENT_TOP_K: dict[str, int] = {
     "admission_policy": 10,
     "school_overview": 6,
@@ -21,6 +19,8 @@ _INTENT_TOP_K: dict[str, int] = {
     "campus_life": 6,
 }
 _DEFAULT_TOP_K = 8
+_DEFAULT_SQL_LIMIT = 6
+
 
 def _get_top_k(intent: str, iteration: int) -> int:
     """按意图与轮次计算 top_k：首轮用意图默认值，重试时放大。"""
@@ -70,6 +70,17 @@ def _build_plan_rule(
         "strategy": "vector_keyword_hybrid",
         "vector_query": query.strip(),
         "top_k": top_k,
+    }
+
+
+def _build_sql_plan(intent: str) -> SQLPlan:
+    enabled = intent == "admission_policy"
+    return {
+        "enabled": enabled,
+        "province": "",
+        "year": "",
+        "limit": _DEFAULT_SQL_LIMIT,
+        "reason": "enable sql branch for admission_policy" if enabled else "intent is not admission_policy",
     }
 
 
@@ -129,6 +140,7 @@ def _llm_plan(
 
 def create_search_planner_node(*, model_id: str | None = None):
     """创建检索策略节点。model_id 存在时使用 LLM 生成参数，否则或失败时用规则兜底。"""
+
     def search_planner_node(state: RAGState) -> dict:
         query = str(state.get("query") or "").strip()
         intent = str(state.get("intent") or "").strip()
@@ -156,16 +168,20 @@ def create_search_planner_node(*, model_id: str | None = None):
         else:
             plan = _build_plan_rule(intent, iteration, eval_reason, query)
 
+        sql_plan = _build_sql_plan(intent)
         logger.debug(
             "SearchPlanner done.\n"
             f"intent={intent}\n"
             f"iteration={iteration}\n"
             f"strategy={plan.get('strategy')}\n"
             f"vector_query={plan.get('vector_query', '')[:60]}\n"
-            f"top_k={plan.get('top_k')}"
+            f"top_k={plan.get('top_k')}\n"
+            f"sql_enabled={sql_plan.get('enabled')}\n"
+            f"sql_limit={sql_plan.get('limit')}"
         )
         return {
             "search_plan": plan,
+            "sql_plan": sql_plan,
             "rag_iteration": iteration + 1,
         }
 
