@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { ArrowRight } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
+import { resolveApiUrl } from "@/lib/resolve-api-url";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
 
@@ -76,8 +77,9 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
+  const resolvedApiUrl = resolveApiUrl(apiUrl);
   const streamValue = useTypedStream({
-    apiUrl,
+    apiUrl: resolvedApiUrl,
     apiKey: apiKey ?? undefined,
     assistantId,
     threadId: threadId ?? null,
@@ -96,13 +98,14 @@ const StreamSession = ({
   });
 
   useEffect(() => {
-    checkGraphStatus(apiUrl, apiKey).then((ok) => {
+    checkGraphStatus(resolvedApiUrl, apiKey).then((ok) => {
       if (!ok) {
         toast.error("Failed to connect to LangGraph server", {
           description: () => (
             <p>
-              Please ensure your graph is running at <code>{apiUrl}</code> and
-              your API key is correctly set (if connecting to a deployed graph).
+              Please ensure your graph is running at <code>{resolvedApiUrl}</code>{" "}
+              and your API key is correctly set (if connecting to a deployed
+              graph).
             </p>
           ),
           duration: 10000,
@@ -111,7 +114,7 @@ const StreamSession = ({
         });
       }
     });
-  }, [apiKey, apiUrl]);
+  }, [apiKey, resolvedApiUrl]);
 
   return (
     <StreamContext.Provider value={streamValue}>
@@ -121,7 +124,7 @@ const StreamSession = ({
 };
 
 // Default values for the form
-const DEFAULT_API_URL = "http://localhost:8008";
+const DEFAULT_API_URL = "/api";
 const DEFAULT_ASSISTANT_ID = "agent";
 
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
@@ -154,8 +157,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   };
 
   // Determine final values to use, prioritizing URL params then env vars
-  const finalApiUrl = apiUrl || envApiUrl;
-  const finalAssistantId = assistantId || envAssistantId;
+  const finalApiUrl = apiUrl || envApiUrl || DEFAULT_API_URL;
+  const finalAssistantId = assistantId || envAssistantId || DEFAULT_ASSISTANT_ID;
 
   // If we're missing any required values, show the form
   if (!finalApiUrl || !finalAssistantId) {
