@@ -1,0 +1,26 @@
+# Core API
+fastapi==0.115.14
+uvicorn==0.40.0
+python-dotenv==1.2.1
+pydantic==2.11.7
+
+# HTTP / config
+requests==2.32.5
+urllib3==2.5.0
+PyYAML==6.0.3
+
+# Data access / ingestion
+SQLAlchemy==2.0.46
+pandas
+openpyxl>=3.1,<4.0
+
+# LLM / orchestration
+langgraph==1.0.7
+langgraph-checkpoint-sqlite==3.0.3
+langchain-core==1.2.7
+langchain-openai==1.1.7
+langchain-community==0.4.1
+langfuse==4.0.0
+
+# Vector store
+pymilvus==2.6.9

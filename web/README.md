@@ -7,40 +7,34 @@ This directory contains the standalone Next.js frontend for AlayaEnrollment.
 Install dependencies:
 
 ```bash
-cd D:\AlayaEnrollment\web
+cd web
 npm install
 ```
 
 Start the dev server:
 
 ```bash
-cd D:\AlayaEnrollment\web
+cd web
 npm run dev
 ```
 
-The app is available at `http://localhost:3000`.
+The app will be served at `http://localhost:3000`.
 
 ## Environment Variables
 
-The frontend reads public environment variables from the repository root:
-
-- `D:\AlayaEnrollment\.env`
-
-Relevant variables:
-
-- `NEXT_PUBLIC_API_URL`
-- `NEXT_PUBLIC_ASSISTANT_ID`
-- `NEXT_PUBLIC_LANGSMITH_API_KEY`
+- Copy `web/.env.example` to `web/.env.local` (or configure env vars in your deployment runner).
+- Only `NEXT_PUBLIC_*` values belong here. Keep private API keys in the root `.env` for the backend.
+- Default `NEXT_PUBLIC_API_URL=/api` assumes you run behind a reverse proxy that forwards `/api/*` to FastAPI. When developing without Nginx, change it to `http://localhost:8008`.
 
 ## Build
 
 ```bash
-cd D:\AlayaEnrollment\web
+cd web
 npm run build
 npm run start
 ```
 
 ## Notes
 
-- The frontend is intentionally independent from `D:\AlayaEnrollment\apps`.
-- You can remove the old `apps` directory after migration as long as the root `.env` and backend remain in place.
+- The frontend is intentionally independent from any legacy `apps/` directory.
+- After migration you can delete the old `apps` folder as long as the backend and root `.env` remain.
