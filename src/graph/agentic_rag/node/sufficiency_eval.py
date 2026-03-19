@@ -1,28 +1,43 @@
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from typing import Any
 
 from langchain_core.documents import Document
 
-from ....config.settings import REQUIRED_SLOTS_BY_INTENT
 from ...llm import get_model
 from ..schemas import RAGState
 
+
 logger = logging.getLogger(__name__)
 
-_EVAL_SYSTEM_PROMPT = """你是一个检索质量评估器。
-根据用户问题和检索到的文档，判断当前检索结果的充分性。
+_EVAL_SYSTEM_PROMPT = """
+你是“南方科技大学研究生招生与培养助手”的检索充分性评估模块。
 
-输出严格 JSON，包含三个字段：
-- eval_result: 必须是以下之一：
-  - "sufficient"：文档能够支撑回答用户问题
-  - "missing_slots"：文档中涉及多个省份/年份等维度，需要用户补充具体信息才能精确回答
-  - "insufficient_docs"：文档内容与用户问题相关性低，或文档为空
-- missing_slots: 列表，如 ["province"]；仅 missing_slots 时填写，其余填 []
-- reason: 简短评估理由（不超过50字）
-"""
+【任务】
+根据用户问题和当前检索到的文档摘要，判断这些材料是否足以支撑生成阶段给出可靠回答。
+
+【判定标准】
+- `sufficient`：
+  - 文档与问题主题高度相关；
+  - 能覆盖用户问题的核心诉求，或至少足以支持安全、明确的答复；
+  - 对流程、条件、政策解释类问题，已有足够依据说明关键步骤或关键限制。
+- `insufficient_docs`：
+  - 文档为空；
+  - 文档与问题相关性弱；
+  - 文档只覆盖了边缘信息，无法支撑回答核心问题；
+  - 用户问题包含多个重点，但当前文档无法覆盖主要部分。
+
+【输出要求】
+严格输出 JSON，且只包含：
+- `eval_result`: `"sufficient"` 或 `"insufficient_docs"`
+- `reason`: 不超过 50 字的简短理由
+
+【注意】
+- 评估的是“是否足以支撑回答”，不是“是否与问题略有相关”。
+- 不要输出任何 JSON 之外的内容。
+""".strip()
 
 
 def _chunk_summary(chunks: list[Document], max_chars: int = 800) -> str:
@@ -47,48 +62,33 @@ class SufficiencyEvaluator:
         self,
         *,
         query: str,
-        intent: str,
-        slots: dict[str, str],
         chunks: list[Document],
     ) -> dict[str, Any]:
         # 快速规则：空文档直接 insufficient_docs
         if not chunks:
             return {
                 "eval_result": "insufficient_docs",
-                "missing_slots": [],
                 "eval_reason": "检索结果为空",
             }
 
-        # 快速规则：已满足所需槽位 且 有足够文档 → sufficient（减少 LLM 调用）
-        required = REQUIRED_SLOTS_BY_INTENT.get(intent, [])
-        slots_ok = all(slots.get(s, "").strip() for s in required)
-        if slots_ok and len(chunks) >= 2:
+        # 快速规则：有足够文档 → sufficient（减少 LLM 调用）
+        if len(chunks) >= 2:
             try:
-                return self._llm_evaluate(query=query, intent=intent, slots=slots, chunks=chunks)
+                return self._llm_evaluate(query=query, chunks=chunks)
             except Exception as exc:
                 logger.warning(f"SufficiencyEval LLM failed, fallback to sufficient. {exc}")
                 return {
                     "eval_result": "sufficient",
-                    "missing_slots": [],
                     "eval_reason": "LLM eval failed, fallback",
                 }
 
-        if not slots_ok:
-            missing = [s for s in required if not slots.get(s, "").strip()]
-            return {
-                "eval_result": "missing_slots",
-                "missing_slots": missing,
-                "eval_reason": f"缺少槽位: {missing}",
-            }
-
         # 只有 1 条文档，尝试 LLM 评估
         try:
-            return self._llm_evaluate(query=query, intent=intent, slots=slots, chunks=chunks)
+            return self._llm_evaluate(query=query, chunks=chunks)
         except Exception as exc:
             logger.warning(f"SufficiencyEval LLM failed, fallback to sufficient. {exc}")
             return {
                 "eval_result": "sufficient",
-                "missing_slots": [],
                 "eval_reason": "LLM eval failed, fallback",
             }
 
@@ -96,17 +96,13 @@ class SufficiencyEvaluator:
         self,
         *,
         query: str,
-        intent: str,
-        slots: dict[str, str],
         chunks: list[Document],
     ) -> dict[str, Any]:
         model = get_model(self.model_id)
         user_prompt = (
-            f"用户问题：{query}\n"
-            f"意图：{intent}\n"
-            f"已知槽位：{json.dumps(slots, ensure_ascii=False)}\n"
-            f"检索到的文档摘要：\n{_chunk_summary(chunks)}\n"
-            "请评估上述检索结果是否充分。"
+            f"【用户问题】\n{query}\n"
+            f"【检索文档摘要】\n{_chunk_summary(chunks)}\n"
+            "请判断这些材料是否足以支持生成可靠回答。"
         )
         response = model.invoke(
             [("system", _EVAL_SYSTEM_PROMPT), ("user", user_prompt)],
@@ -119,12 +115,11 @@ class SufficiencyEvaluator:
             data = content
 
         eval_result = str(data.get("eval_result", "sufficient"))
-        if eval_result not in ("sufficient", "missing_slots", "insufficient_docs"):
+        if eval_result not in ("sufficient", "insufficient_docs"):
             eval_result = "sufficient"
 
         return {
             "eval_result": eval_result,
-            "missing_slots": list(data.get("missing_slots") or []),
             "eval_reason": str(data.get("reason", "")),
         }
 
@@ -134,8 +129,6 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
 
     def sufficiency_eval_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
-        intent = str(state.get("intent") or "").strip()
-        slots = dict(state.get("slots") or {})
         chunks = list(state.get("chunks") or [])
         iteration = int(state.get("rag_iteration") or 0)
         max_iter = int(state.get("max_iterations") or 2)
@@ -145,21 +138,18 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
             logger.debug(f"SufficiencyEval: max_iterations reached ({iteration} > {max_iter}), force sufficient.")
             return {
                 "eval_result": "sufficient",
-                "missing_slots": [],
                 "eval_reason": "max_iterations reached",
             }
 
-        result = evaluator.evaluate(query=query, intent=intent, slots=slots, chunks=chunks)
+        result = evaluator.evaluate(query=query, chunks=chunks)
         logger.debug(
             "SufficiencyEval done.\n"
-            f"intent={intent}\n"
             f"chunks={len(chunks)}\n"
             f"eval_result={result['eval_result']}\n"
             f"reason={result['eval_reason']}"
         )
         return {
             "eval_result": result["eval_result"],
-            "missing_slots": result["missing_slots"],
             "eval_reason": result["eval_reason"],
         }
 

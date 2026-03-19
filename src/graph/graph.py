@@ -4,21 +4,15 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from ..config.settings import CONFIDENCE_THRESHOLD, IntentType
 from .agentic_rag.graph import create_agentic_rag_node
 from .node.generation import create_generation_node
 from .node.intent_classify import create_intent_classify_node
 from .state import WorkflowState
 
 
-def route_after_intent(state: WorkflowState) -> str:
-    intent = str(state.get("intent") or "").strip()
-    confidence = float(state.get("confidence") or 0.0)
-
-    if (
-        intent in (IntentType.OUT_OF_SCOPE.value, IntentType.OTHER.value)
-        or confidence < CONFIDENCE_THRESHOLD
-    ):
+def route_after_scope(state: WorkflowState) -> str:
+    in_scope = state.get("in_scope")
+    if in_scope is False:
         return "generate"
     return "agentic_rag"
 
@@ -57,7 +51,7 @@ def create_graph(
     graph.add_edge(START, "intent_classify")
     graph.add_conditional_edges(
         "intent_classify",
-        route_after_intent,
+        route_after_scope,
         {
             "generate": "generate",
             "agentic_rag": "agentic_rag",

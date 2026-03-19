@@ -1,27 +1,11 @@
 from __future__ import annotations
 
 from .settings import (
-    ALLOWED_INTENTS,
-    CONFIDENCE_THRESHOLD,
-    DEFAULT_FALLBACK_INTENT,
     HISTORY_LAST_K_TURNS,
-    INTENT_DESCRIPTIONS,
-    IntentType,
-    REQUIRED_SLOTS_BY_INTENT,
-    SLOT_CLARIFY_PROMPTS,
-    SLOT_DESCRIPTIONS,
     config,
 )
 
 __all__ = [
-    "ALLOWED_INTENTS",
-    "CONFIDENCE_THRESHOLD",
-    "DEFAULT_FALLBACK_INTENT",
     "HISTORY_LAST_K_TURNS",
-    "INTENT_DESCRIPTIONS",
-    "IntentType",
-    "REQUIRED_SLOTS_BY_INTENT",
-    "SLOT_CLARIFY_PROMPTS",
-    "SLOT_DESCRIPTIONS",
     "config",
 ]

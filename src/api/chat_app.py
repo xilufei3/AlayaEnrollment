@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
+import threading
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Annotated, Any, Iterator
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field
 
 try:
@@ -16,6 +22,49 @@ except ModuleNotFoundError:
     class VectorStoreError(Exception):
         """Compatibility fallback when the legacy packages module is absent."""
 from ..runtime.graph_runtime import AdmissionGraphRuntime, RuntimeConfig
+
+
+class _SharedAPIKeyMiddleware(BaseHTTPMiddleware):
+    """Simple header-based auth for single server deployments."""
+
+    def __init__(self, app: FastAPI, *, api_key: str | None, exempt_paths: tuple[str, ...] = ("/health", "/info")) -> None:
+        super().__init__(app)
+        self._api_key = (api_key or "").strip()
+        self._exempt = set(exempt_paths)
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        if not self._api_key or request.url.path in self._exempt:
+            return await call_next(request)
+
+        provided = request.headers.get("X-Api-Key", "")
+        if provided and secrets.compare_digest(provided, self._api_key):
+            return await call_next(request)
+
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized: missing or invalid X-Api-Key"},
+        )
+
+
+class _SlidingWindowLimiter:
+    """In-memory sliding window limiter; sufficient for single-host deployments."""
+
+    def __init__(self, max_calls: int, window_seconds: float) -> None:
+        self.max_calls = max(1, max_calls)
+        self.window = max(1.0, window_seconds)
+        self._hits: dict[str, deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def allow(self, key: str) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            bucket = self._hits[key]
+            while bucket and now - bucket[0] > self.window:
+                bucket.popleft()
+            if len(bucket) >= self.max_calls:
+                return False
+            bucket.append(now)
+            return True
 
 
 def _sse(event: str, data: Any) -> str:
@@ -91,6 +140,19 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    shared_api_key = os.getenv("API_SHARED_KEY", "").strip()
+    rate_limit_per_minute = int(os.getenv("API_RATE_LIMIT_PER_MINUTE", "120") or 0)
+    limiter = None
+    if rate_limit_per_minute > 0:
+        limiter = _SlidingWindowLimiter(max_calls=rate_limit_per_minute, window_seconds=60.0)
+
+    if shared_api_key:
+        app.add_middleware(
+            _SharedAPIKeyMiddleware,
+            api_key=shared_api_key,
+            exempt_paths=("/health", "/info"),
+        )
+
     repo_root = _repo_root()
     env_file = repo_root / ".env"
     runtime = AdmissionGraphRuntime(
@@ -101,11 +163,23 @@ def create_app() -> FastAPI:
     )
     app.state.runtime = runtime
     app.state.startup_error = None
+    app.state.rate_limiter = limiter
 
     def _runtime_or_503() -> AdmissionGraphRuntime:
         if app.state.startup_error is not None:
             raise HTTPException(status_code=503, detail=str(app.state.startup_error))
         return app.state.runtime
+
+    def _check_rate_limit(request: Request, label: str) -> None:
+        rl: _SlidingWindowLimiter | None = getattr(app.state, "rate_limiter", None)
+        if rl is None:
+            return
+        client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if not client_ip and request.client:
+            client_ip = request.client.host or ""
+        key = f"{label}:{client_ip or 'unknown'}"
+        if not rl.allow(key):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
     @app.on_event("startup")
     def _startup() -> None:
@@ -165,10 +239,11 @@ def create_app() -> FastAPI:
         return rt.get_thread_history(thread_id=thread_id, limit=req.limit)
 
     @app.post("/threads/{thread_id}/runs/stream")
-    def stream_run_with_thread(thread_id: str, req: RunStreamRequest) -> StreamingResponse:
+    def stream_run_with_thread(thread_id: str, req: RunStreamRequest, request: Request) -> StreamingResponse:
         rt = _runtime_or_503()
         assistant_id = (req.assistant_id or "agent").strip() or "agent"
         rt.create_thread(thread_id=thread_id, metadata={"graph_id": assistant_id})
+        _check_rate_limit(request, "runs_stream")
         run_id, event_source = rt.stream_langgraph_events(
             thread_id=thread_id,
             input_payload=req.input,
@@ -191,11 +266,12 @@ def create_app() -> FastAPI:
         return StreamingResponse(event_iter(), media_type="text/event-stream", headers=headers)
 
     @app.post("/runs/stream")
-    def stream_run_without_thread(req: RunStreamRequest) -> StreamingResponse:
+    def stream_run_without_thread(req: RunStreamRequest, request: Request) -> StreamingResponse:
         rt = _runtime_or_503()
         assistant_id = (req.assistant_id or "agent").strip() or "agent"
         thread = rt.create_thread(thread_id=str(uuid4()), metadata={"graph_id": assistant_id})
         thread_id = str(thread["thread_id"])
+        _check_rate_limit(request, "runs_stream")
         run_id, event_source = rt.stream_langgraph_events(
             thread_id=thread_id,
             input_payload=req.input,
@@ -218,7 +294,7 @@ def create_app() -> FastAPI:
         return StreamingResponse(event_iter(), media_type="text/event-stream", headers=headers)
 
     @app.post("/api/chat/stream")
-    def chat_stream(req: ChatStreamRequest) -> StreamingResponse:
+    def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
         rt = _runtime_or_503()
         session_id = req.session_id.strip()
         message = req.message.strip()
@@ -227,6 +303,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="session_id is required")
         if not message:
             raise HTTPException(status_code=400, detail="message is required")
+        _check_rate_limit(request, f"chat_stream:{session_id}")
 
         def event_iter() -> Iterator[str]:
             try:

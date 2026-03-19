@@ -103,9 +103,9 @@ def _load_sqlite_checkpointer(db_path: Path) -> tuple[Any, Any | None]:
 
 class AdmissionGraphRuntime:
     STAGE_ORDER = (
-        "intent_classify",   # 意图识别
+        "intent_classify",   # 范围判定（in_scope）
         "agentic_rag",      # Agentic RAG（检索+评估循环）
-        "generate",         # 生成答案（含 out_of_scope / 缺槽位追问 / other / RAG 回答）
+        "generate",         # 生成答案（含 in_scope 提示 / RAG 回答）
     )
 
     def __init__(self, cfg: RuntimeConfig) -> None:
@@ -573,14 +573,10 @@ class AdmissionGraphRuntime:
                 summary: dict[str, Any] = {"stage": node_name, "session_id": session_id}
                 if isinstance(payload, dict):
                     if node_name == "intent_classify":
-                        summary["intent"] = payload.get("intent", "")
-                        summary["confidence"] = payload.get("confidence", 0.0)
+                        summary["in_scope"] = bool(payload.get("in_scope", True))
                     elif node_name == "agentic_rag":
                         chunks = payload.get("chunks", []) or []
                         summary["chunks_count"] = len(chunks)
-                        missing = payload.get("missing_slots") or []
-                        if missing:
-                            summary["missing_slots"] = missing
                     elif node_name == "generate":
                         answer = str(payload.get("answer", "") or "")
                         result_answer = answer

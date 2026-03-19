@@ -15,8 +15,6 @@ class SearchPlan(TypedDict, total=False):
 class RAGState(TypedDict, total=False):
     # ── 从 WorkflowState 传入（只读输入）─────────────────────────────
     query: str
-    intent: str
-    slots: dict[str, str]
 
     # ── 子图内部循环状态 ──────────────────────────────────────────────
     search_plan: SearchPlan
@@ -30,7 +28,6 @@ class RAGState(TypedDict, total=False):
     # ── 重排后的最终文档（子图输出到 WorkflowState.chunks）────────────
     chunks: list[Document]
 
-    # ── 充分性评估结果（子图输出到 WorkflowState.missing_slots）───────
-    eval_result: Literal["sufficient", "missing_slots", "insufficient_docs"]
-    missing_slots: list[str]    # eval 发现还需要的槽位
+    # ── 充分性评估结果 ───────────────────────────────────────────────
+    eval_result: Literal["sufficient", "insufficient_docs"]
     eval_reason: str            # 评估理由（用于重试时 search_planner 参考）

@@ -13,65 +13,50 @@ from ..llm import get_model
 
 logger = logging.getLogger(__name__)
 
-# ── 场景化 System Prompt（按意图分支）────────────────────────────────────────
+_GRAD_SYSTEM_PROMPT = """
+你是“南方科技大学研究生招生与培养助手”。
 
-_SYSTEM_PROMPTS: dict[str, str] = {
-    "other": (
-        "你是南科大招生咨询助手，正在接待一位高中生或家长。\n"
-        "用户发出的是问候或简单交互，请以亲切、简洁的方式回应，"
-        "并适当引导对方说出真正想了解的招生问题。\n"
-        "回复控制在 50 字以内，不要罗列信息，不要捏造任何数据。"
-    ),
-    "school_overview": (
-        "你是南科大招生咨询助手，正在向一位高中生或家长介绍学校。\n"
-        "回复目标：帮助用户在 5 分钟内建立整体印象，判断南科大是否值得深入了解。\n"
-        "回复结构：① 学校定位（1-2句）② 核心特色（3点以内）③ 校园与城市（1句）④ 建议进一步了解的方向\n"
-        "回复长度：200-300 字，结构清晰，避免堆砌。\n"
-        "重要：所有信息以检索到的文档为准，不得补充未经文档支撑的内容。"
-    ),
-    "admission_policy": (
-        "你是南科大招生咨询助手，正在向准备报考的考生或家长解答招生政策。\n"
-        "回复要求：\n"
-        "- 数字（分数线、比例、日期）必须有文档依据，不得自行估算\n"
-        "- 如文档信息不完整，明确说明「以招生网最新公告为准」\n"
-        "- 对631计算方式等核心规则需完整解释，不可含糊\n"
-        "警告：招生政策每年变化，如涉及时间节点或录取规则，必须提醒用户以当年官方通知为准。\n"
-        "如检索文档为空，请回答：「该信息暂无记录，建议访问 admission.sustech.edu.cn 或联系招办（0755-88010401）。」"
-    ),
-    "major_and_training": (
-        "你是南科大招生咨询助手，正在向纠结选专业的高中生或家长介绍专业情况。\n"
-        "回复结构：① 专业定位与培养目标 ② 核心课程与实践机会 ③ 深造/就业方向（如有数据）\n"
-        "如用户同时问及就业/深造，说明「具体就业数据请参考学校年度就业质量报告」。\n"
-        "重要：所有课程、方向信息以检索到的文档为准，不得捏造课程名或比例。"
-    ),
-    "career_and_development": (
-        "你是南科大招生咨询助手，正在回答关于毕业去向的问题。\n"
-        "回复要求：深造率、就业率等数据严格以文档为准，不得引用行业平均数据替代。\n"
-        "如文档信息不足，明确告知：「具体数据请参考南科大官网发布的年度就业质量报告。」\n"
-        "如检索文档为空，请如实说明暂无数据，并引导用户至官网查询。"
-    ),
-    "campus_life": (
-        "你是南科大招生咨询助手，正在回答关于校园生活的问题。\n"
-        "回复要求：住宿费、学费等具体数字严格以文档为准，不得估算。\n"
-        "如信息不完整，引导用户：「具体费用标准请联系南科大学生事务处或查阅官网。」\n"
-        "如检索文档为空，请如实说明并提供官网引导。"
-    ),
-}
+【职责范围】
+- 仅回答与南科大研究生招生、学籍、培养、学位、奖助、导师选择、论文答辩及在校管理相关的问题。
+- 面向研究生考生与在读研究生，提供政策解读、流程说明和材料梳理。
 
-_DEFAULT_SYSTEM_PROMPT = (
-    "你是南科大招生咨询助手，目标用户为高中生及家长。\n"
-    "回复要求：\n"
-    "1. 优先依据检索到的文档回答，不得捏造数字、日期或比例\n"
-    "2. 若文档不足，明确说明并建议用户查阅官网或联系招办\n"
-    "3. 回复简洁直接，使用中文"
-)
+【信息来源要求】
+- 只能依据提供的参考材料、学校正式通知、教育主管部门正式文件作答。
+- 严禁编造分数线、名额、日期、费用、政策条款、联系方式或办事流程细节。
+- 若参考材料之间存在冲突或表述不完整，必须明确说明“不确定/信息不足”，并提示以最新官方通知为准。
 
-_NO_RETRIEVAL_SUFFIX = (
-    "\n\n注意：当前暂无相关检索文档。请勿编造任何具体数字、时间节点、录取比例或分数线。"
-    "如无法从已知信息中给出可靠回答，请直接引导用户至官方渠道：\n"
-    "招生网：https://admission.sustech.edu.cn\n"
-    "招办电话：0755-88010401"
-)
+【回答要求】
+- 默认使用中文，语气专业、友好、克制，避免营销化表达。
+- 优先直接回答用户问题，再补充依据、条件限制或操作步骤。
+- 涉及流程类问题时，优先使用分点或分步骤表达。
+- 涉及政策适用条件时，要明确前提、对象和可能的例外情况。
+- 若用户一次提多个问题，按主题分点回答，避免遗漏。
+
+【禁止事项】
+- 不要臆测学校尚未公布的信息。
+- 不要把本科招生政策混入研究生语境。
+- 不要输出“我是 AI”之类与任务无关的自我描述。
+""".strip()
+
+_NO_RETRIEVAL_SUFFIX = """
+【额外约束】
+当前没有检索到可直接支撑答案的参考材料。
+- 不得补充未经证实的具体政策或数字。
+- 若只能给出原则性建议，请明确说明“需以南科大研究生院/研究生招生官网最新通知为准”。
+- 必要时引导用户查看官方公告、招生简章、培养方案或联系对应培养单位/研招办。
+""".strip()
+
+_OUT_OF_SCOPE_SYSTEM_PROMPT = """
+你是南方科技大学研究生招生与培养助手的范围提醒模块。
+
+任务：
+- 判断到用户问题不属于南科大研究生招生与培养相关范围后，输出一句简短回复。
+
+回复要求：
+- 仅用一句中文回复，控制在 60 字以内。
+- 先说明你的职责范围，再自然邀请用户提问研究生相关问题。
+- 不要展开解释，不要给出与问题无关的建议。
+""".strip()
 
 
 class GenerationComponent:
@@ -172,7 +157,7 @@ class GenerationComponent:
         user_prompt: str,
         model_id: str | None = None,
     ) -> str:
-        """单轮短回复，用于缺槽位追问、out_of_scope 等场景。"""
+        """单轮短回复，用于范围提醒等场景。"""
         active_model_kind = model_id or self.model_id or "generation"
         try:
             model = get_model(active_model_kind)
@@ -188,7 +173,6 @@ class GenerationComponent:
         self,
         *,
         query: str,
-        intent: str,
         chunks: Sequence[Any],
         messages: Sequence[Any] | None = None,
         model_id: str | None = None,
@@ -201,17 +185,21 @@ class GenerationComponent:
         context = "\n".join(chunk_texts) if has_context else "（无检索文档）"
         history = self._history_text(messages or [])
 
-        system_prompt = _SYSTEM_PROMPTS.get(intent, _DEFAULT_SYSTEM_PROMPT)
+        system_prompt = _GRAD_SYSTEM_PROMPT
         if not has_context:
             system_prompt += _NO_RETRIEVAL_SUFFIX
         if system_suffix:
             system_prompt += "\n\n" + system_suffix
 
         user_prompt = (
-            f"用户问题：{query}\n"
-            f"对话历史：\n{history}\n"
-            f"检索到的参考文档：\n{context}\n"
-            "请根据以上信息作答："
+            "请基于给定材料生成最终回复。\n\n"
+            f"【当前问题】\n{query}\n\n"
+            f"【最近对话历史】\n{history}\n\n"
+            f"【参考材料】\n{context}\n\n"
+            "请遵循以下输出原则：\n"
+            "1. 先给出直接结论；\n"
+            "2. 再补充依据、条件或操作步骤；\n"
+            "3. 若材料不足，明确说明不足之处，并提示用户以官方最新通知为准。"
         )
 
         request = [("system", system_prompt), ("user", user_prompt)]
@@ -284,50 +272,20 @@ def create_generation_node(*, model_id: str | None = None):
     def generation_node(state: WorkflowState, runtime: Runtime[Any]):
         try:
             query = _extract_query_from_state(state)
-            intent = str(state.get("intent") or "").strip()
-            missing_slots = state.get("missing_slots") or []
             messages_full = state.get("messages") or []
             runtime_model_id = getattr(getattr(runtime, "context", None), "chat_model_id", None)
+            in_scope = state.get("in_scope")
 
-            # 缺槽位处理：RAG 已执行，根据是否有 chunks 选择不同策略
-            chunks_for_missing = state.get("chunks") or []
-            if missing_slots:
-                slot_names = "、".join(missing_slots)
-                if chunks_for_missing:
-                    # 有检索结果：先展示示例，再引导用户补充缺少的槽位
-                    suffix = (
-                        f"【重要提示】用户问题需要补充「{slot_names}」才能给出精确回答。\n"
-                        "请按以下结构作答：\n"
-                        "1. 先从检索文档中提取 1-2 个示例（如有多个省份/年份数据，选有代表性的列举），帮助用户建立参考；\n"
-                        "2. 在回复末尾用一句自然的话引导用户告知具体的信息（如所在省份、目标年份等）。\n"
-                        "所有数据必须来自检索文档，不得捏造。"
-                    )
-                    max_msgs = HISTORY_LAST_K_TURNS * 2
-                    messages_for_history = list(messages_full)[-max_msgs:] if messages_full else []
-                    answer = component.generate(
-                        query=query,
-                        intent=intent,
-                        chunks=chunks_for_missing,
-                        messages=messages_for_history,
-                        model_id=runtime_model_id,
-                        system_suffix=suffix,
-                    )
-                    if not answer:
-                        answer = f"为了给您精确的答案，请补充「{slot_names}」。"
-                else:
-                    # 无检索结果：仅生成一句追问
-                    sys = (
-                        "你是南科大招生咨询助手。用户的问题需要补充一些信息才能准确回答。"
-                        "请用一句话礼貌地追问用户补充上述信息，语气亲切，控制在 40 字以内。不要重复用户原话，直接输出追问内容。"
-                    )
-                    user = f"用户问题：{query}\n当前缺少的信息：{slot_names}\n请输出一句追问："
-                    answer = component.generate_short(
-                        system_prompt=sys,
-                        user_prompt=user,
-                        model_id=runtime_model_id,
-                    )
-                    if not answer:
-                        answer = f"为了准确回答，请先告诉我您的{slot_names}。"
+            if in_scope is False:
+                sys = _OUT_OF_SCOPE_SYSTEM_PROMPT
+                user = f"用户问题：{query}\n请输出一句回复："
+                answer = component.generate_short(
+                    system_prompt=sys,
+                    user_prompt=user,
+                    model_id=runtime_model_id,
+                )
+                if not answer:
+                    answer = "我主要解答南科大研究生招生与培养相关问题，欢迎告诉我想了解的项目、流程或政策。"
                 history = _normalize_messages(messages_full)
                 last = history[-1] if history else None
                 if query and not (
@@ -338,30 +296,6 @@ def create_generation_node(*, model_id: str | None = None):
                 history.append(AIMessage(content=answer))
                 return {"answer": answer, "messages": history}
 
-            # 超出招生范围：由大模型生成一句礼貌说明并引导
-            if intent == "out_of_scope":
-                sys = (
-                    "你是南科大招生咨询助手。用户的问题与南科大本科招生无关。"
-                    "请用一句话礼貌说明你主要回答招生相关问题，并引导用户提问。控制在 60 字以内。直接输出回复内容。"
-                )
-                user = f"用户问题：{query}\n请输出一句回复："
-                answer = component.generate_short(
-                    system_prompt=sys,
-                    user_prompt=user,
-                    model_id=runtime_model_id,
-                )
-                if not answer:
-                    answer = "我目前主要回答南科大本科招生相关问题，你可以问我学校概况、招生政策、专业培养或校园生活。"
-                history = _normalize_messages(messages_full)
-                last = history[-1] if history else None
-                if query and not (
-                    isinstance(last, HumanMessage)
-                    and str(getattr(last, "content", "")).strip() == query
-                ):
-                    history.append(HumanMessage(content=query))
-                history.append(AIMessage(content=answer))
-                return {"answer": answer, "messages": history, "retrieval_skipped": True}
-
             chunks = state.get("chunks") or []
             # 拼对话历史时只取最近 k 轮，由 config 控制
             max_msgs = HISTORY_LAST_K_TURNS * 2
@@ -369,14 +303,12 @@ def create_generation_node(*, model_id: str | None = None):
 
             answer = component.generate(
                 query=query,
-                intent=intent,
                 chunks=chunks,
                 messages=messages_for_history,
                 model_id=runtime_model_id,
             )
             logger.debug(
                 "Generation done.\n"
-                f"intent={intent}\n"
                 f"query={query}\n"
                 f"chunks={len(chunks)}\n"
                 f"answer_len={len(answer)}"

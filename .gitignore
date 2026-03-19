@@ -14,7 +14,7 @@ data/bm25_state/
 htmlcov/
 
 # Local data files
-data/raw/
+# data/raw/
 
 # Milvus / Docker volumes
 infra/milvus/volumes_clean/

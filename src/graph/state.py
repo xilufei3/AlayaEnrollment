@@ -13,16 +13,10 @@ class WorkflowState(TypedDict, total=False):
     messages: list[BaseMessage]
 
     query: str
-    intent: str
-    confidence: float
-
-    # Slot extraction for policy questions
-    slots: dict[str, str]
-    missing_slots: list[str]
+    in_scope: bool
 
     # Retrieval + generation
     chunks: list[Document]
     citations: list[dict[str, str]]
-    retrieval_skipped: bool
 
     answer: str
