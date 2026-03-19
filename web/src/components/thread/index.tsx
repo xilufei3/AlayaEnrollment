@@ -73,7 +73,7 @@ function ScrollToBottom(props: { className?: string }) {
       onClick={() => scrollToBottom()}
     >
       <ArrowDown className="h-4 w-4" />
-      <span>鍥炲埌搴曢儴</span>
+      <span>回到底部</span>
     </Button>
   );
 }
@@ -113,7 +113,7 @@ function LandingHero(props: { onPromptSelect: (question: string) => void }) {
               {prompt.question}
             </p>
             <div className="mt-3 flex items-center gap-1 text-[13px] font-medium text-primary">
-              绔嬪嵆鎻愰棶
+              立即提问
               <ChevronRight className="size-4 transition-transform group-hover:translate-x-0.5" />
             </div>
           </motion.button>
@@ -334,11 +334,11 @@ export function Thread() {
               <div className="flex items-center gap-2">
                 <div className="hidden items-center gap-2 rounded-full border border-white/70 bg-white/65 px-3 py-2 text-xs text-muted-foreground xl:flex">
                   <Sparkles className="size-3.5 text-[#C9A35D]" />
-                  闈㈠悜楂樹腑鐢熶笌瀹堕暱鐨勬嫑鐢熷挩璇㈠叆鍙?                </div>
+                  面向高中生与家长的招生咨询入口</div>
                 <TooltipIconButton
                   size="lg"
                   className="rounded-full p-4 hover:bg-white/80"
-                  tooltip="鏂板缓鍜ㄨ"
+                  tooltip="新建咨询"
                   variant="ghost"
                   onClick={handleResetThread}
                 >
@@ -431,7 +431,7 @@ export function Thread() {
                         <div className="space-y-2">
                           {!chatStarted && (
                             <p className="text-sm font-medium text-foreground">
-                              浠庝竴涓棶棰樺紑濮嬶紝鎴戜滑浼氬府浣犳洿蹇⒊鐞嗘嫑鐢熼噸鐐广€?                            </p>
+                              从一个问题开始，我们会帮你更快梳理招生重点。</p>
                           )}
                           <div className="flex items-start gap-2 text-sm leading-6 text-muted-foreground">
                             <ShieldCheck className="mt-1 size-4 shrink-0 text-[#C9A35D]" />
@@ -441,7 +441,7 @@ export function Thread() {
 
                         <div className="flex items-center gap-3 self-end sm:self-auto">
                           <span className="hidden text-xs text-muted-foreground md:inline">
-                            Enter 鍙戦€侊紝Shift + Enter 鎹㈣
+                            Enter 发送，Shift + Enter 换行
                           </span>
                           {stream.isLoading ? (
                             <Button
@@ -451,7 +451,7 @@ export function Thread() {
                               onClick={() => stream.stop()}
                             >
                               <LoaderCircle className="h-4 w-4 animate-spin" />
-                              鍋滄鐢熸垚
+                              停止生成
                             </Button>
                           ) : (
                             <Button
@@ -460,7 +460,7 @@ export function Thread() {
                               className="h-11 rounded-full px-6 shadow-md"
                               disabled={isLoading || !input.trim()}
                             >
-                              鍙戦€佸挩璇?                            </Button>
+                              发送咨询</Button>
                           )}
                         </div>
                       </div>
