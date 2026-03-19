@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   getThreadSearchMetadata,
   resolveThreadConnection,
-} from "./thread-query-config";
+} from "./thread-query-config.ts";
 
 test("falls back to env values when query params are absent", () => {
   const resolved = resolveThreadConnection({

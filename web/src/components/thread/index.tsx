@@ -1,40 +1,41 @@
-import { v4 as uuidv4 } from "uuid";
-import { ReactNode, useEffect, useRef } from "react";
+﻿import { v4 as uuidv4 } from "uuid";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
-import { useStreamContext } from "@/providers/Stream";
-import { useState, FormEvent } from "react";
-import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
-import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
-import { HumanMessage } from "./messages/human";
+import { parseAsBoolean, useQueryState } from "nuqs";
+import { toast } from "sonner";
+import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
+import {
+  ArrowDown,
+  ChevronRight,
+  LoaderCircle,
+  PanelRightClose,
+  PanelRightOpen,
+  ShieldCheck,
+  Sparkles,
+  SquarePen,
+} from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useStreamContext } from "@/providers/Stream";
 import {
   DO_NOT_RENDER_ID_PREFIX,
   ensureToolCallsHaveResponses,
 } from "@/lib/ensure-tool-responses";
-import { LangGraphLogoSVG } from "../icons/langgraph";
-import { TooltipIconButton } from "./tooltip-icon-button";
-import {
-  ArrowDown,
-  LoaderCircle,
-  PanelRightOpen,
-  PanelRightClose,
-  SquarePen,
-} from "lucide-react";
-import { useQueryState, parseAsBoolean } from "nuqs";
-import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
+
+import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
+import { HumanMessage } from "./messages/human";
 import ThreadHistory from "./history";
-import { toast } from "sonner";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { Label } from "../ui/label";
-import { Switch } from "../ui/switch";
-import { GitHubSVG } from "../icons/github";
+import { TooltipIconButton } from "./tooltip-icon-button";
+import { BRAND_COPY, QUICK_PROMPTS } from "./branding";
+import { LANDING_HINT } from "./landing-hint";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../ui/tooltip";
+  shouldShowStandaloneHistoryToggle,
+  shouldShowTopBar,
+} from "./top-bar-visibility";
+import { SustechMark } from "../icons/sustech-mark";
+import { Button } from "../ui/button";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -65,33 +66,60 @@ function ScrollToBottom(props: { className?: string }) {
   return (
     <Button
       variant="outline"
-      className={props.className}
+      className={cn(
+        "surface-glass rounded-full border-white/80 px-4 py-2 text-foreground shadow-[0_14px_28px_rgba(24,72,71,0.14)]",
+        props.className,
+      )}
       onClick={() => scrollToBottom()}
     >
-      <ArrowDown className="w-4 h-4" />
-      <span>Scroll to bottom</span>
+      <ArrowDown className="h-4 w-4" />
+      <span>鍥炲埌搴曢儴</span>
     </Button>
   );
 }
 
-function OpenGitHubRepo() {
+function LandingHero(props: { onPromptSelect: (question: string) => void }) {
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <a
-            href="https://github.com/langchain-ai/agent-chat-ui"
-            target="_blank"
-            className="flex items-center justify-center"
+    <div className="space-y-3 pb-3">
+      <motion.section
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+        className="surface-glass rounded-[1.55rem] border border-white/75 px-4 py-3 shadow-[0_16px_36px_rgba(24,72,71,0.09)] sm:px-5"
+      >
+        <div className="flex items-center gap-3">
+          <SustechMark className="h-10 w-10 shrink-0 rounded-2xl" />
+          <p className="text-sm leading-6 text-muted-foreground">
+            {LANDING_HINT}
+          </p>
+        </div>
+      </motion.section>
+
+      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+        {QUICK_PROMPTS.map((prompt, index) => (
+          <motion.button
+            key={prompt.label}
+            type="button"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05 * index, duration: 0.3 }}
+            onClick={() => props.onPromptSelect(prompt.question)}
+            className="surface-glass group rounded-[1.15rem] border border-white/75 p-3.5 text-left shadow-[0_10px_22px_rgba(24,72,71,0.08)] transition-all hover:-translate-y-1 hover:shadow-[0_16px_30px_rgba(24,72,71,0.12)]"
           >
-            <GitHubSVG width="24" height="24" />
-          </a>
-        </TooltipTrigger>
-        <TooltipContent side="left">
-          <p>Open GitHub repo</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+            <div className="inline-flex rounded-full border border-primary/10 bg-primary/10 px-2 py-1 text-[10px] font-semibold tracking-[0.12em] text-primary">
+              {prompt.label}
+            </div>
+            <p className="mt-2.5 text-[13px] leading-5 text-foreground/88">
+              {prompt.question}
+            </p>
+            <div className="mt-3 flex items-center gap-1 text-[13px] font-medium text-primary">
+              绔嬪嵆鎻愰棶
+              <ChevronRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+            </div>
+          </motion.button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -101,12 +129,9 @@ export function Thread() {
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
-  const [hideToolCalls, setHideToolCalls] = useQueryState(
-    "hideToolCalls",
-    parseAsBoolean.withDefault(false),
-  );
   const [input, setInput] = useState("");
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
   const stream = useStreamContext();
@@ -121,15 +146,13 @@ export function Thread() {
       return;
     }
     try {
-      const message = (stream.error as any).message;
+      const message = (stream.error as { message?: string }).message;
       if (!message || lastError.current === message) {
-        // Message has already been logged. do not modify ref, return early.
         return;
       }
 
-      // Message is defined, and it has not been logged yet. Save it, and send the error
       lastError.current = message;
-      toast.error("An error occurred. Please try again.", {
+      toast.error("Message failed to send. Please try again shortly.", {
         description: (
           <p>
             <strong>Error:</strong> <code>{message}</code>
@@ -143,12 +166,11 @@ export function Thread() {
     }
   }, [stream.error]);
 
-  // TODO: this should be part of the useStream hook
   const prevMessageLength = useRef(0);
   useEffect(() => {
     if (
       messages.length !== prevMessageLength.current &&
-      messages?.length &&
+      messages.length &&
       messages[messages.length - 1].type === "ai"
     ) {
       setFirstTokenReceived(true);
@@ -165,7 +187,7 @@ export function Thread() {
     const newHumanMessage: Message = {
       id: uuidv4(),
       type: "human",
-      content: input,
+      content: input.trim(),
     };
 
     const toolMessages = ensureToolCallsHaveResponses(stream.messages);
@@ -190,7 +212,6 @@ export function Thread() {
   const handleRegenerate = (
     parentCheckpoint: Checkpoint | null | undefined,
   ) => {
-    // Do this so the loading state is correct
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
     stream.submit(undefined, {
@@ -199,85 +220,88 @@ export function Thread() {
     });
   };
 
+  const handlePromptSelect = (question: string) => {
+    setInput(question);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const handleResetThread = () => {
+    setThreadId(null);
+    setInput("");
+  };
+
   const chatStarted = !!threadId || !!messages.length;
+  const showStandaloneHistoryToggle =
+    shouldShowStandaloneHistoryToggle(chatStarted);
   const hasNoAIOrToolMessages = !messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
 
   return (
-    <div className="flex w-full h-screen overflow-hidden">
-      <div className="relative lg:flex hidden">
+    <div className="relative flex h-screen w-full overflow-hidden">
+      <div className="relative hidden lg:flex">
         <motion.div
-          className="absolute h-full border-r bg-white overflow-hidden z-20"
-          style={{ width: 300 }}
-          animate={
-            isLargeScreen
-              ? { x: chatHistoryOpen ? 0 : -300 }
-              : { x: chatHistoryOpen ? 0 : -300 }
-          }
-          initial={{ x: -300 }}
+          className="absolute z-20 h-full overflow-hidden"
+          style={{ width: 320 }}
+          animate={{ x: chatHistoryOpen ? 0 : -320 }}
+          initial={{ x: -320 }}
           transition={
             isLargeScreen
-              ? { type: "spring", stiffness: 300, damping: 30 }
+              ? { type: "spring", stiffness: 300, damping: 32 }
               : { duration: 0 }
           }
         >
-          <div className="relative h-full" style={{ width: 300 }}>
+          <div className="relative h-full" style={{ width: 320 }}>
             <ThreadHistory />
           </div>
         </motion.div>
       </div>
+
       <motion.div
-        className={cn(
-          "flex-1 flex flex-col min-w-0 overflow-hidden relative",
-          !chatStarted && "grid-rows-[1fr]",
-        )}
+        className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
         layout={isLargeScreen}
         animate={{
-          marginLeft: chatHistoryOpen ? (isLargeScreen ? 300 : 0) : 0,
+          marginLeft: chatHistoryOpen ? (isLargeScreen ? 320 : 0) : 0,
           width: chatHistoryOpen
             ? isLargeScreen
-              ? "calc(100% - 300px)"
+              ? "calc(100% - 320px)"
               : "100%"
             : "100%",
         }}
         transition={
           isLargeScreen
-            ? { type: "spring", stiffness: 300, damping: 30 }
+            ? { type: "spring", stiffness: 300, damping: 32 }
             : { duration: 0 }
         }
       >
-        {!chatStarted && (
-          <div className="absolute top-0 left-0 w-full flex items-center justify-between gap-3 p-2 pl-4 z-10">
-            <div>
-              {(!chatHistoryOpen || !isLargeScreen) && (
-                <Button
-                  className="hover:bg-gray-100"
-                  variant="ghost"
-                  onClick={() => setChatHistoryOpen((p) => !p)}
-                >
-                  {chatHistoryOpen ? (
-                    <PanelRightOpen className="size-5" />
-                  ) : (
-                    <PanelRightClose className="size-5" />
-                  )}
-                </Button>
+        {showStandaloneHistoryToggle && (
+          <div className="pointer-events-none absolute left-4 top-4 z-20 sm:left-6 lg:left-8">
+            <TooltipIconButton
+              size="lg"
+              side="right"
+              tooltip={chatHistoryOpen ? "Hide history" : "Show history"}
+              variant="ghost"
+              className="pointer-events-auto size-11 rounded-full border border-white/80 bg-white/82 p-0 shadow-[0_14px_32px_rgba(24,72,71,0.14)] backdrop-blur hover:bg-white"
+              onClick={() => setChatHistoryOpen((prev) => !prev)}
+            >
+              {chatHistoryOpen ? (
+                <PanelRightOpen className="size-5" />
+              ) : (
+                <PanelRightClose className="size-5" />
               )}
-            </div>
-            <div className="absolute top-2 right-4 flex items-center">
-              <OpenGitHubRepo />
-            </div>
+            </TooltipIconButton>
           </div>
         )}
-        {chatStarted && (
-          <div className="flex items-center justify-between gap-3 p-2 z-10 relative">
-            <div className="flex items-center justify-start gap-2 relative">
-              <div className="absolute left-0 z-10">
+
+        {shouldShowTopBar(chatStarted) && (
+          <div className="relative z-10 px-4 pb-2 pt-4 sm:px-6 lg:px-8">
+            <div className="surface-glass mx-auto flex w-full max-w-6xl items-center justify-between gap-3 rounded-[1.85rem] border border-white/70 px-3 py-3 shadow-[0_18px_46px_rgba(24,72,71,0.12)]">
+              <div className="flex min-w-0 items-center gap-3">
                 {(!chatHistoryOpen || !isLargeScreen) && (
                   <Button
-                    className="hover:bg-gray-100"
+                    className="rounded-full hover:bg-white/80"
                     variant="ghost"
-                    onClick={() => setChatHistoryOpen((p) => !p)}
+                    onClick={() => setChatHistoryOpen((prev) => !prev)}
                   >
                     {chatHistoryOpen ? (
                       <PanelRightOpen className="size-5" />
@@ -286,55 +310,59 @@ export function Thread() {
                     )}
                   </Button>
                 )}
-              </div>
-              <motion.button
-                className="flex gap-2 items-center cursor-pointer"
-                onClick={() => setThreadId(null)}
-                animate={{
-                  marginLeft: !chatHistoryOpen ? 48 : 0,
-                }}
-                transition={{
-                  type: "spring",
-                  stiffness: 300,
-                  damping: 30,
-                }}
-              >
-                <LangGraphLogoSVG width={32} height={32} />
-                <span className="text-xl font-semibold tracking-tight">
-                  Agent Chat
-                </span>
-              </motion.button>
-            </div>
 
-            <div className="flex items-center gap-4">
-              <div className="flex items-center">
-                <OpenGitHubRepo />
+                <button
+                  type="button"
+                  className="flex min-w-0 items-center gap-3 text-left"
+                  onClick={handleResetThread}
+                >
+                  <SustechMark className="h-12 w-12 sm:h-14 sm:w-14" />
+                  <div className="min-w-0">
+                    <p className="text-[11px] uppercase tracking-[0.32em] text-primary/70">
+                      SUSTech Admissions
+                    </p>
+                    <h1 className="truncate font-serif text-xl text-foreground sm:text-2xl">
+                      {BRAND_COPY.title}
+                    </h1>
+                    <p className="hidden truncate text-sm text-muted-foreground md:block">
+                      {BRAND_COPY.subtitle}
+                    </p>
+                  </div>
+                </button>
               </div>
-              <TooltipIconButton
-                size="lg"
-                className="p-4"
-                tooltip="New thread"
-                variant="ghost"
-                onClick={() => setThreadId(null)}
-              >
-                <SquarePen className="size-5" />
-              </TooltipIconButton>
-            </div>
 
-            <div className="absolute inset-x-0 top-full h-5 bg-gradient-to-b from-background to-background/0" />
+              <div className="flex items-center gap-2">
+                <div className="hidden items-center gap-2 rounded-full border border-white/70 bg-white/65 px-3 py-2 text-xs text-muted-foreground xl:flex">
+                  <Sparkles className="size-3.5 text-[#C9A35D]" />
+                  闈㈠悜楂樹腑鐢熶笌瀹堕暱鐨勬嫑鐢熷挩璇㈠叆鍙?                </div>
+                <TooltipIconButton
+                  size="lg"
+                  className="rounded-full p-4 hover:bg-white/80"
+                  tooltip="鏂板缓鍜ㄨ"
+                  variant="ghost"
+                  onClick={handleResetThread}
+                >
+                  <SquarePen className="size-5" />
+                </TooltipIconButton>
+              </div>
+            </div>
           </div>
         )}
 
         <StickToBottom className="relative flex-1 overflow-hidden">
           <StickyToBottomContent
             className={cn(
-              "absolute px-4 inset-0 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
-              !chatStarted && "flex flex-col items-stretch mt-[25vh]",
-              chatStarted && "grid grid-rows-[1fr_auto]",
+              "absolute inset-0 overflow-y-scroll px-4 sm:px-6 lg:px-8",
+              "[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/20 [&::-webkit-scrollbar-track]:bg-transparent",
             )}
-            contentClassName="pt-8 pb-16  max-w-3xl mx-auto flex flex-col gap-4 w-full"
+            contentClassName={cn(
+              "mx-auto flex w-full flex-col gap-5 pb-24",
+              chatStarted ? "max-w-4xl pt-3" : "max-w-6xl pt-4",
+            )}
             content={
               <>
+                {!chatStarted && <LandingHero onPromptSelect={handlePromptSelect} />}
+
                 {messages
                   .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
                   .map((message, index) =>
@@ -353,8 +381,7 @@ export function Thread() {
                       />
                     ),
                   )}
-                {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
-                    We need to render it outside of the messages list, since there are no messages to render */}
+
                 {hasNoAIOrToolMessages && !!stream.interrupt && (
                   <AssistantMessage
                     key="interrupt-msg"
@@ -363,81 +390,82 @@ export function Thread() {
                     handleRegenerate={handleRegenerate}
                   />
                 )}
+
                 {isLoading && !firstTokenReceived && (
                   <AssistantMessageLoading />
                 )}
               </>
             }
             footer={
-              <div className="sticky flex flex-col items-center gap-8 bottom-0 bg-white">
-                {!chatStarted && (
-                  <div className="flex gap-3 items-center">
-                    <LangGraphLogoSVG className="flex-shrink-0 h-8" />
-                    <h1 className="text-2xl font-semibold tracking-tight">
-                      Agent Chat
-                    </h1>
-                  </div>
-                )}
+              <div className="sticky bottom-0 z-10 bg-gradient-to-t from-white via-white/96 to-transparent pb-4 pt-6">
+                <div className="mx-auto w-full max-w-5xl">
+                  <ScrollToBottom className="absolute bottom-full left-1/2 mb-4 -translate-x-1/2 animate-in fade-in-0 zoom-in-95" />
 
-                <ScrollToBottom className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 animate-in fade-in-0 zoom-in-95" />
+                  <div className="surface-glass relative overflow-hidden rounded-[2rem] border border-white/80 shadow-[0_24px_60px_rgba(24,72,71,0.12)]">
+                    <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#C9A35D]/75 to-transparent" />
+                    <form onSubmit={handleSubmit} className="grid">
+                      <div className="px-5 pt-5 sm:px-6 sm:pt-6">
+                        <textarea
+                          ref={textareaRef}
+                          value={input}
+                          onChange={(e) => setInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (
+                              e.key === "Enter" &&
+                              !e.shiftKey &&
+                              !e.metaKey &&
+                              !e.nativeEvent.isComposing
+                            ) {
+                              e.preventDefault();
+                              const el = e.target as HTMLElement | undefined;
+                              const form = el?.closest("form");
+                              form?.requestSubmit();
+                            }
+                          }}
+                          placeholder={BRAND_COPY.composerPlaceholder}
+                          className="min-h-[112px] w-full resize-none bg-transparent text-[15px] leading-7 text-foreground shadow-none outline-none placeholder:text-muted-foreground/85 focus:outline-none"
+                        />
+                      </div>
 
-                <div className="bg-muted rounded-2xl border shadow-xs mx-auto mb-8 w-full max-w-3xl relative z-10">
-                  <form
-                    onSubmit={handleSubmit}
-                    className="grid grid-rows-[1fr_auto] gap-2 max-w-3xl mx-auto"
-                  >
-                    <textarea
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (
-                          e.key === "Enter" &&
-                          !e.shiftKey &&
-                          !e.metaKey &&
-                          !e.nativeEvent.isComposing
-                        ) {
-                          e.preventDefault();
-                          const el = e.target as HTMLElement | undefined;
-                          const form = el?.closest("form");
-                          form?.requestSubmit();
-                        }
-                      }}
-                      placeholder="Type your message..."
-                      className="p-3.5 pb-0 border-none bg-transparent field-sizing-content shadow-none ring-0 outline-none focus:outline-none focus:ring-0 resize-none"
-                    />
+                      <div className="flex flex-col gap-4 border-t border-border/60 px-5 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-6">
+                        <div className="space-y-2">
+                          {!chatStarted && (
+                            <p className="text-sm font-medium text-foreground">
+                              浠庝竴涓棶棰樺紑濮嬶紝鎴戜滑浼氬府浣犳洿蹇⒊鐞嗘嫑鐢熼噸鐐广€?                            </p>
+                          )}
+                          <div className="flex items-start gap-2 text-sm leading-6 text-muted-foreground">
+                            <ShieldCheck className="mt-1 size-4 shrink-0 text-[#C9A35D]" />
+                            <p>{BRAND_COPY.disclaimer}</p>
+                          </div>
+                        </div>
 
-                    <div className="flex items-center justify-between p-2 pt-4">
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <Switch
-                            id="render-tool-calls"
-                            checked={hideToolCalls ?? false}
-                            onCheckedChange={setHideToolCalls}
-                          />
-                          <Label
-                            htmlFor="render-tool-calls"
-                            className="text-sm text-gray-600"
-                          >
-                            Hide Tool Calls
-                          </Label>
+                        <div className="flex items-center gap-3 self-end sm:self-auto">
+                          <span className="hidden text-xs text-muted-foreground md:inline">
+                            Enter 鍙戦€侊紝Shift + Enter 鎹㈣
+                          </span>
+                          {stream.isLoading ? (
+                            <Button
+                              key="stop"
+                              variant="outline"
+                              className="h-11 rounded-full px-5"
+                              onClick={() => stream.stop()}
+                            >
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                              鍋滄鐢熸垚
+                            </Button>
+                          ) : (
+                            <Button
+                              type="submit"
+                              variant="brand"
+                              className="h-11 rounded-full px-6 shadow-md"
+                              disabled={isLoading || !input.trim()}
+                            >
+                              鍙戦€佸挩璇?                            </Button>
+                          )}
                         </div>
                       </div>
-                      {stream.isLoading ? (
-                        <Button key="stop" onClick={() => stream.stop()}>
-                          <LoaderCircle className="w-4 h-4 animate-spin" />
-                          Cancel
-                        </Button>
-                      ) : (
-                        <Button
-                          type="submit"
-                          className="transition-all shadow-md"
-                          disabled={isLoading || !input.trim()}
-                        >
-                          Send
-                        </Button>
-                      )}
-                    </div>
-                  </form>
+                    </form>
+                  </div>
                 </div>
               </div>
             }

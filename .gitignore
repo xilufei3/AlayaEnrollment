@@ -7,9 +7,11 @@
 *.sqlite*
 *.log
 .coverage
+.worktrees/
 data/db/
 data/bm25_state/
 htmlcov/
+output/
 
 # Local data files
 data/raw/
@@ -34,6 +36,7 @@ venv/
 # Node artifacts
 node_modules/
 .next/
+.next_stale_*/
 .turbo/
 *.tsbuildinfo
 dist/

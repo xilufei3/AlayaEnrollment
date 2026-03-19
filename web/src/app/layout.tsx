@@ -1,18 +1,13 @@
 import type { Metadata } from "next";
-import "./globals.css";
-import { Inter } from "next/font/google";
 import React from "react";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 
-const inter = Inter({
-  subsets: ["latin"],
-  preload: true,
-  display: "swap",
-});
+import "./globals.css";
+import { APP_METADATA } from "@/components/thread/branding";
 
 export const metadata: Metadata = {
-  title: "Agent Inbox",
-  description: "Agent Inbox UX by LangChain",
+  title: APP_METADATA.title,
+  description: APP_METADATA.description,
 };
 
 export default function RootLayout({
@@ -21,8 +16,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
+    <html lang="zh-CN">
+      <body className="font-sans">
         <NuqsAdapter>{children}</NuqsAdapter>
       </body>
     </html>
