@@ -10,7 +10,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
-from ..llm import get_model
 from ...config.settings import (
     ALLOWED_INTENTS,
     DEFAULT_FALLBACK_INTENT,
@@ -19,35 +18,12 @@ from ...config.settings import (
     REQUIRED_SLOTS_BY_INTENT,
     SLOT_DESCRIPTIONS,
 )
+from ..llm import get_model
+from ..prompts import INTENT_CLASSIFIER_SYSTEM_PROMPT_TEMPLATE
 from ..state import WorkflowState
 
 
 logger = logging.getLogger(__name__)
-
-INTENT_PROMPT_TEMPLATE = """
-你是南科大招生咨询智能体的意图分类与槽位抽取模块。
-
-一、意图分类
-将用户问题严格归类为下列意图之一：
-{intent_descriptions}
-
-二、槽位抽取
-从用户问题中抽取以下槽位（仅当用户明确提到或可合理推断时填写，否则该键填空字符串 ""）：
-{slot_descriptions}
-
-三、输出格式
-严格输出一个 JSON 对象，包含以下字段：
-- intent：字符串，必须为上方意图列表中的键名。
-- reason：字符串，简短分类理由（不超过30字）。
-- confidence：数字，0 到 1 之间，表示分类置信度。
-- slots：对象，键为槽位名（province、year），值为抽取到的内容；未提及则对应值为 ""。
-
-四、其他规则
-- 问题不完整或存在歧义时，选择最接近的意图；与招生完全无关时选 out_of_scope。
-- 若提供了「最近几轮对话」，请结合上下文理解当前问题的指代或省略（如「那浙江省呢」指上一轮话题的浙江省）。
-- 省份请统一为简称，如「浙江省」→ "浙江"，「北京市」→ "北京"。
-- 年份为四位数字字符串，如 "2025"。
-"""
 
 class IntentClassificationResult(BaseModel):
     intent: str = Field(..., description="intent label")
@@ -70,7 +46,7 @@ class EnrollmentIntentClassifier:
     def __init__(self, *, model_id: str | None = None) -> None:
         self.model_id = model_id
         self._parser = JsonOutputParser(pydantic_object=IntentClassificationResult)
-        self._prompt = ChatPromptTemplate.from_template(INTENT_PROMPT_TEMPLATE)
+        self._prompt = ChatPromptTemplate.from_template(INTENT_CLASSIFIER_SYSTEM_PROMPT_TEMPLATE)
 
     @staticmethod
     def _normalize_intent(intent: str) -> str:
@@ -140,7 +116,7 @@ def _to_text(content: Any) -> str:
                 parts.append(str(item["text"]))
             else:
                 parts.append(str(item))
-        return " ".join([p for p in parts if p]).strip()
+        return " ".join([part for part in parts if part]).strip()
     if content is None:
         return ""
     return str(content).strip()

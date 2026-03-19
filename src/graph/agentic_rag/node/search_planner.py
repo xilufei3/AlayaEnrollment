@@ -6,6 +6,7 @@ import logging
 from pydantic import BaseModel, Field
 
 from ...llm import get_model
+from ...prompts import SEARCH_PLANNER_SYSTEM_PROMPT
 from ..schemas import RAGState, SQLPlan, SearchPlan
 
 logger = logging.getLogger(__name__)
@@ -28,19 +29,6 @@ def _get_top_k(intent: str, iteration: int) -> int:
     if iteration >= 1:
         top_k = min(top_k + 4, 16)
     return top_k
-
-
-SEARCH_PLANNER_SYSTEM = """你是南科大招生咨询的检索策略规划模块。根据用户问题和上下文，生成检索参数。
-
-请完成以下任务：
-1. **Query Rewrite**：将用户问题改写为更适合向量检索的表述（补全指代、去掉口语化），若已清晰可原样返回。
-2. **子问题拆分**：若问题包含多个独立子问题（如同时问分数线和专业），拆成若干条子问题；否则返回包含改写后问题的单元素列表。
-
-输出严格为 JSON，且只包含以下字段（不要多余字段）：
-- rewritten_query: 字符串，改写后的主查询（用于向量检索）
-- sub_queries: 字符串数组，子问题列表（至少包含 rewritten_query）
-- reason: 字符串，简短理由（不超过 50 字）
-"""
 
 
 class SearchPlanLLMOutput(BaseModel):
@@ -97,7 +85,7 @@ def _llm_plan(
     user_parts = [
         f"用户问题：{query}",
         f"意图：{intent}",
-        f"已知槽位：{json.dumps(slots, ensure_ascii=False)}",
+        f"已知信息：{json.dumps(slots, ensure_ascii=False)}",
         f"当前检索轮次：{iteration}",
     ]
     if eval_reason.strip():
@@ -106,7 +94,7 @@ def _llm_plan(
     user_prompt = "\n".join(user_parts)
 
     response = model.invoke(
-        [("system", SEARCH_PLANNER_SYSTEM), ("user", user_prompt)],
+        [("system", SEARCH_PLANNER_SYSTEM_PROMPT), ("user", user_prompt)],
         response_format={"type": "json_object"},
     )
     content = getattr(response, "content", response)
