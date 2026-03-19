@@ -11,7 +11,7 @@ PyYAML==6.0.3
 
 # Data access / ingestion
 SQLAlchemy==2.0.46
-pandas
+pandas==3.0.1
 openpyxl>=3.1,<4.0
 
 # LLM / orchestration

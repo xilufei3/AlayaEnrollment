@@ -1,0 +1,24 @@
+vector:
+  categories:
+    - school_info
+    - admissions
+    - major
+    - career
+    - campus
+  chunk_size: 1200
+  chunk_overlap: 150
+  enable_ocr: true
+  parser_preference:
+    - builtin
+  poll_interval: 1.0
+  max_wait: null
+  default_input_dir: data/raw/unstructured
+  supported_extensions:
+    - .md
+    - .txt
+    - .docx
+    - .pdf
+    - .xlsx
+
+sql:
+  if_exists: append

@@ -20,19 +20,14 @@ import logging
 import sys
 from pathlib import Path
 
+from ..config.settings import config
 from .sql_manager import SQLManager
 from .system_db import SystemDB
 from .vector_manager import VectorManager
 
 logger = logging.getLogger(__name__)
 
-VECTOR_CATEGORIES: tuple[str, ...] = (
-    "school_info",
-    "admissions",
-    "major",
-    "career",
-    "campus",
-)
+VECTOR_CATEGORIES: tuple[str, ...] = config.ingest.vector.categories
 
 
 # ════════════════════════════════════════════════════════════
@@ -135,8 +130,8 @@ def health_check() -> dict:
 def ingest_vector(
     file_path: str,
     category: str | None = None,
-    chunk_size: int = 512,
-    chunk_overlap: int = 64,
+    chunk_size: int = config.ingest.vector.chunk_size,
+    chunk_overlap: int = config.ingest.vector.chunk_overlap,
     *,
     flush: bool = True,
 ) -> None:
@@ -181,7 +176,7 @@ def ingest_vector(
 def ingest_sql(
     file_path: str,
     table_name: str,
-    if_exists: str = "append",
+    if_exists: str = config.ingest.sql.if_exists,
 ) -> None:
     """
     CSV / Excel → SQLite
@@ -242,13 +237,13 @@ def main() -> None:
     p_vec.add_argument("--file",          required=True)
     p_vec.add_argument("--category",      type=parse_category,
                        help="导入分类，可选；留空则不写入分类标签")
-    p_vec.add_argument("--chunk-size",    type=int, default=512)
-    p_vec.add_argument("--chunk-overlap", type=int, default=64)
+    p_vec.add_argument("--chunk-size",    type=int, default=config.ingest.vector.chunk_size)
+    p_vec.add_argument("--chunk-overlap", type=int, default=config.ingest.vector.chunk_overlap)
 
     p_sql = sub.add_parser("ingest-sql", help="导入结构化数据")
     p_sql.add_argument("--file",      required=True)
     p_sql.add_argument("--table",     required=True)
-    p_sql.add_argument("--if-exists", default="append",
+    p_sql.add_argument("--if-exists", default=config.ingest.sql.if_exists,
                        choices=["append", "replace", "fail"])
 
     sub.add_parser("health", help="健康检查")

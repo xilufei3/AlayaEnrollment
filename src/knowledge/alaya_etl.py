@@ -20,10 +20,12 @@ class CreateJobRequest:
     upload_ref: str
     doc_id: int | None = None
     dataset: str | None = None
-    chunk_size: int = 800
-    chunk_overlap: int = 120
-    enable_ocr: bool = True
-    parser_preference: Sequence[str] = field(default_factory=lambda: ["builtin"])
+    chunk_size: int = config.ingest.vector.chunk_size
+    chunk_overlap: int = config.ingest.vector.chunk_overlap
+    enable_ocr: bool = config.ingest.vector.enable_ocr
+    parser_preference: Sequence[str] = field(
+        default_factory=lambda: list(config.ingest.vector.parser_preference)
+    )
 
 
 @dataclass(slots=True)
@@ -58,12 +60,14 @@ class ProcessDocumentRequest:
     file_path: Path
     doc_id: int | None = None
     dataset: str | None = None
-    chunk_size: int = 800
-    chunk_overlap: int = 120
-    enable_ocr: bool = True
-    parser_preference: Sequence[str] = field(default_factory=lambda: ["builtin"])
-    poll_interval: float = 1.0
-    max_wait: int | None = None
+    chunk_size: int = config.ingest.vector.chunk_size
+    chunk_overlap: int = config.ingest.vector.chunk_overlap
+    enable_ocr: bool = config.ingest.vector.enable_ocr
+    parser_preference: Sequence[str] = field(
+        default_factory=lambda: list(config.ingest.vector.parser_preference)
+    )
+    poll_interval: float = config.ingest.vector.poll_interval
+    max_wait: int | None = config.ingest.vector.max_wait
 
 
 class AlayaETL:
@@ -99,15 +103,15 @@ class AlayaETL:
     def process_file(
         self,
         file_path: Path,
-        chunk_size: int = 800,
-        chunk_overlap: int = 120,
-        enable_ocr: bool = True,
+        chunk_size: int = config.ingest.vector.chunk_size,
+        chunk_overlap: int = config.ingest.vector.chunk_overlap,
+        enable_ocr: bool = config.ingest.vector.enable_ocr,
         *,
         doc_id: int | None = None,
         dataset: str | None = None,
-        parser_preference: Sequence[str] = ("builtin",),
-        poll_interval: float = 1.0,
-        max_wait: int | None = None,
+        parser_preference: Sequence[str] = config.ingest.vector.parser_preference,
+        poll_interval: float = config.ingest.vector.poll_interval,
+        max_wait: int | None = config.ingest.vector.max_wait,
     ) -> list[dict[str, Any]]:
         result = self.process_document(
             ProcessDocumentRequest(

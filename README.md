@@ -40,6 +40,12 @@ Copy-Item .env.example .env
 
 ### 3. 启动后端
 
+先安装 Python 依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
 启动 Milvus 及 API：
 
 ```bash

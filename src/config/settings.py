@@ -6,11 +6,58 @@ from enum import Enum
 from pathlib import Path
 
 from dotenv import load_dotenv
+import yaml
 
 load_dotenv()
 
 SRC_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = SRC_ROOT.parent
+INGEST_CONFIG_PATH = SRC_ROOT / "config" / "ingest.yaml"
+
+
+def _load_yaml_config(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def _coerce_int(value: object, default: int, *, minimum: int | None = None) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and parsed < minimum:
+        return default
+    return parsed
+
+
+def _coerce_float(value: object, default: float, *, minimum: float | None = None) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and parsed < minimum:
+        return default
+    return parsed
+
+
+def _coerce_bool(value: object, default: bool) -> bool:
+    return value if isinstance(value, bool) else default
+
+
+def _coerce_str(value: object, default: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return default
+
+
+def _coerce_str_tuple(value: object, default: tuple[str, ...]) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return default
+    items = tuple(str(item).strip() for item in value if str(item).strip())
+    return items or default
 
 
 class IntentType(str, Enum):
@@ -116,6 +163,95 @@ class DBConfig:
     system_db_path: str = str(REPO_ROOT / "data" / "db" / "system.db")
 
 
+@dataclass(frozen=True)
+class VectorIngestConfig:
+    categories: tuple[str, ...] = (
+        "school_info",
+        "admissions",
+        "major",
+        "career",
+        "campus",
+    )
+    chunk_size: int = 512
+    chunk_overlap: int = 64
+    enable_ocr: bool = True
+    parser_preference: tuple[str, ...] = ("builtin",)
+    poll_interval: float = 1.0
+    max_wait: int | None = None
+    default_input_dir: str = "data/raw/unstructured"
+    supported_extensions: tuple[str, ...] = (".md", ".txt", ".doc", ".docx", ".pdf")
+
+
+@dataclass(frozen=True)
+class SQLIngestConfig:
+    if_exists: str = "append"
+
+
+@dataclass(frozen=True)
+class IngestConfig:
+    config_path: str = str(INGEST_CONFIG_PATH)
+    vector: VectorIngestConfig = field(default_factory=VectorIngestConfig)
+    sql: SQLIngestConfig = field(default_factory=SQLIngestConfig)
+
+    @classmethod
+    def from_file(cls, path: Path = INGEST_CONFIG_PATH) -> "IngestConfig":
+        defaults_vector = VectorIngestConfig()
+        defaults_sql = SQLIngestConfig()
+        raw = _load_yaml_config(path)
+
+        vector_raw = raw.get("vector", {}) if isinstance(raw.get("vector", {}), dict) else {}
+        sql_raw = raw.get("sql", {}) if isinstance(raw.get("sql", {}), dict) else {}
+
+        chunk_size = _coerce_int(
+            vector_raw.get("chunk_size"),
+            defaults_vector.chunk_size,
+            minimum=1,
+        )
+        chunk_overlap = _coerce_int(
+            vector_raw.get("chunk_overlap"),
+            defaults_vector.chunk_overlap,
+            minimum=0,
+        )
+        if chunk_overlap >= chunk_size:
+            chunk_overlap = defaults_vector.chunk_overlap
+
+        max_wait_raw = vector_raw.get("max_wait")
+        max_wait = None if max_wait_raw is None else _coerce_int(max_wait_raw, 0, minimum=1)
+        if max_wait == 0:
+            max_wait = None
+
+        return cls(
+            config_path=str(path),
+            vector=VectorIngestConfig(
+                categories=_coerce_str_tuple(vector_raw.get("categories"), defaults_vector.categories),
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                enable_ocr=_coerce_bool(vector_raw.get("enable_ocr"), defaults_vector.enable_ocr),
+                parser_preference=_coerce_str_tuple(
+                    vector_raw.get("parser_preference"),
+                    defaults_vector.parser_preference,
+                ),
+                poll_interval=_coerce_float(
+                    vector_raw.get("poll_interval"),
+                    defaults_vector.poll_interval,
+                    minimum=0.0,
+                ),
+                max_wait=max_wait,
+                default_input_dir=_coerce_str(
+                    vector_raw.get("default_input_dir"),
+                    defaults_vector.default_input_dir,
+                ),
+                supported_extensions=_coerce_str_tuple(
+                    vector_raw.get("supported_extensions"),
+                    defaults_vector.supported_extensions,
+                ),
+            ),
+            sql=SQLIngestConfig(
+                if_exists=_coerce_str(sql_raw.get("if_exists"), defaults_sql.if_exists),
+            ),
+        )
+
+
 @dataclass
 class AgentConfig:
     llm: LLMConfig | None = None
@@ -123,6 +259,7 @@ class AgentConfig:
     alaya: AlayaConfig | None = None
     rerank: RerankConfig | None = None
     db: DBConfig | None = None
+    ingest: IngestConfig | None = None
 
     def __post_init__(self) -> None:
         self.llm = self.llm or LLMConfig()
@@ -130,6 +267,7 @@ class AgentConfig:
         self.alaya = self.alaya or AlayaConfig()
         self.rerank = self.rerank or RerankConfig()
         self.db = self.db or DBConfig()
+        self.ingest = self.ingest or IngestConfig.from_file()
 
 
 config = AgentConfig()
@@ -142,15 +280,18 @@ __all__ = [
     "DBConfig",
     "DEFAULT_FALLBACK_INTENT",
     "HISTORY_LAST_K_TURNS",
+    "IngestConfig",
     "INTENT_DESCRIPTIONS",
     "IntentType",
     "LLMConfig",
     "MilvusConfig",
+    "SQLIngestConfig",
     "REPO_ROOT",
     "RerankConfig",
     "REQUIRED_SLOTS_BY_INTENT",
     "SLOT_CLARIFY_PROMPTS",
     "SLOT_DESCRIPTIONS",
     "SRC_ROOT",
+    "VectorIngestConfig",
     "config",
 ]

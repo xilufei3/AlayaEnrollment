@@ -12,16 +12,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.config.settings import config
 from src.knowledge.manage import ingest_vector
 
 
-VECTOR_CATEGORIES: tuple[str, ...] = (
-    "school_info",
-    "admissions",
-    "major",
-    "career",
-    "campus",
-)
+VECTOR_CATEGORIES: tuple[str, ...] = config.ingest.vector.categories
 
 
 def parse_category(value: str) -> str | None:
@@ -42,8 +37,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=parse_category,
         help="导入分类，可选；留空则不写入分类标签",
     )
-    parser.add_argument("--chunk-size", type=int, default=512, help="分块大小")
-    parser.add_argument("--chunk-overlap", type=int, default=64, help="分块重叠大小")
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=config.ingest.vector.chunk_size,
+        help="分块大小",
+    )
+    parser.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=config.ingest.vector.chunk_overlap,
+        help="分块重叠大小",
+    )
     parser.add_argument("--query", help="导入后用于验证检索的查询语句")
     parser.add_argument("--top-k", type=int, default=3, help="验证检索返回条数")
     return parser

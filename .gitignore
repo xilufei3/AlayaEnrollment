@@ -4,9 +4,7 @@
 
 # Runtime state
 .runtime/
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
+*.sqlite*
 *.log
 .coverage
 data/db/
@@ -17,7 +15,6 @@ htmlcov/
 data/raw/
 
 # Milvus / Docker volumes
-infra/milvus/volumes_clean/
 infra/**/volumes_*/
 infra/**/volumes/
 
