@@ -113,6 +113,28 @@ python -m script.ingest_file --file ./data/raw/unstructured/本科专业.md --ca
 python -m script.demo_vector_search --query "本科专业" --top-k 3
 ```
 
+## 结构化 SQL 数据
+
+当前结构化录取数据改为手工维护流程：
+
+- 手工创建 `data/db/admissions.db`
+- 手工执行建表 SQL
+- 手工把 Excel / CSV 数据导入 SQLite
+- `src/config/table_registry.yaml` 只保留查询元数据，不再负责建表或导入
+- `src/knowledge/sql_queries.py` 保存手写 SQL 查询函数
+
+校验已注册表和查询键：
+
+```bash
+python -m src.knowledge.manage validate-sql
+```
+
+调试 `admission_scores` 查询：
+
+```bash
+python -m src.knowledge.manage query-admission-scores --province 安徽 --year 2024
+```
+
 ## 服务器部署
 
 适用于单机部署场景，默认后端 `8008`、前端 `3000`。
