@@ -121,15 +121,12 @@ export default function ThreadHistory() {
           <div className="flex items-start gap-3">
             <SustechMark className="h-11 w-11" />
             <div>
-              <p className="text-xs uppercase tracking-[0.28em] text-primary/70">
-                SUSTech
+              <p className="text-[11px] font-medium tracking-[0.18em] text-primary/72">
+                SUSTech Admissions
               </p>
-              <h1 className="font-serif text-xl text-foreground">
+              <h1 className="mt-1 text-sm font-medium text-foreground">
                 {BRAND_COPY.historyTitle}
               </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {BRAND_COPY.historySubtitle}
-              </p>
             </div>
           </div>
           <Button
@@ -160,7 +157,7 @@ export default function ThreadHistory() {
         >
           <SheetContent side="left" className="surface-glass flex border-white/70 lg:hidden">
             <SheetHeader>
-              <SheetTitle className="font-serif text-xl">
+              <SheetTitle className="text-sm font-medium text-foreground">
                 {BRAND_COPY.historyTitle}
               </SheetTitle>
             </SheetHeader>

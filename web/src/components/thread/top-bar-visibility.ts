@@ -3,7 +3,7 @@ export function shouldShowTopBar(chatStarted: boolean): boolean {
 }
 
 export function shouldShowStandaloneHistoryToggle(
-  chatStarted: boolean,
+  _chatStarted: boolean,
 ): boolean {
-  return !chatStarted;
+  return true;
 }

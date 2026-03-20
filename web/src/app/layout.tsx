@@ -8,6 +8,11 @@ import { APP_METADATA } from "@/components/thread/branding";
 export const metadata: Metadata = {
   title: APP_METADATA.title,
   description: APP_METADATA.description,
+  icons: {
+    icon: "/branding/sustech-logo.png",
+    shortcut: "/branding/sustech-logo.png",
+    apple: "/branding/sustech-logo.png",
+  },
 };
 
 export default function RootLayout({

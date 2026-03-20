@@ -33,14 +33,14 @@ test("shows a standalone history toggle before the consultation starts", async (
   );
 });
 
-test("hides the standalone history toggle after the consultation starts", async () => {
+test("keeps a standalone history toggle after the consultation starts", async () => {
   const { shouldShowStandaloneHistoryToggle } = await import(
     "./top-bar-visibility.ts"
   );
 
   assert.equal(
     shouldShowStandaloneHistoryToggle(true),
-    false,
-    "active consultation state should rely on the top header toggle instead",
+    true,
+    "active consultation state should preserve a separate history entry point when the compact header is simplified",
   );
 });
