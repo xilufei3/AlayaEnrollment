@@ -2,11 +2,12 @@ import { validate } from "uuid";
 
 export function getThreadSearchMetadata(
   assistantId: string,
-): { graph_id: string } | { assistant_id: string } {
+  deviceId: string,
+): { graph_id: string; device_id: string } | { assistant_id: string; device_id: string } {
   if (validate(assistantId)) {
-    return { assistant_id: assistantId };
+    return { assistant_id: assistantId, device_id: deviceId };
   }
-  return { graph_id: assistantId };
+  return { graph_id: assistantId, device_id: deviceId };
 }
 
 export function resolveThreadConnection({

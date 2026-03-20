@@ -43,13 +43,17 @@ test("returns null when neither query nor env contains values", () => {
 });
 
 test("uses assistant_id for UUID assistant ids", () => {
-  const metadata = getThreadSearchMetadata("123e4567-e89b-12d3-a456-426614174000");
+  const metadata = getThreadSearchMetadata(
+    "123e4567-e89b-12d3-a456-426614174000",
+    "device-1",
+  );
   assert.deepEqual(metadata, {
     assistant_id: "123e4567-e89b-12d3-a456-426614174000",
+    device_id: "device-1",
   });
 });
 
 test("uses graph_id for non-UUID assistant ids", () => {
-  const metadata = getThreadSearchMetadata("agent");
-  assert.deepEqual(metadata, { graph_id: "agent" });
+  const metadata = getThreadSearchMetadata("agent", "device-1");
+  assert.deepEqual(metadata, { graph_id: "agent", device_id: "device-1" });
 });

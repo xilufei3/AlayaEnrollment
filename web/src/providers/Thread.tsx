@@ -1,4 +1,5 @@
 import { getApiKey } from "@/lib/api-key";
+import { getDeviceId } from "@/lib/device-id";
 import { Thread } from "@langchain/langgraph-sdk";
 import { useQueryState } from "nuqs";
 import {
@@ -46,9 +47,10 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     const client = createClient(resolvedApiUrl, getApiKey() ?? undefined);
 
     const threads = await client.threads.search({
-      metadata: {
-        ...getThreadSearchMetadata(resolvedAssistantId),
-      },
+      metadata: getThreadSearchMetadata(
+        resolvedAssistantId,
+        getDeviceId(),
+      ),
       limit: 100,
     });
 

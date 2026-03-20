@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { useThreads } from "@/providers/Thread";
 import { Thread } from "@langchain/langgraph-sdk";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
@@ -97,10 +97,12 @@ function ThreadHistoryLoading() {
 
 export default function ThreadHistory() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
+  const [threadId, setThreadId] = useQueryState("threadId");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
+  const [hasFetchedThreads, setHasFetchedThreads] = useState(false);
 
   const { getThreads, threads, setThreads, threadsLoading, setThreadsLoading } =
     useThreads();
@@ -111,8 +113,17 @@ export default function ThreadHistory() {
     getThreads()
       .then(setThreads)
       .catch(console.error)
-      .finally(() => setThreadsLoading(false));
+      .finally(() => {
+        setThreadsLoading(false);
+        setHasFetchedThreads(true);
+      });
   }, [getThreads, setThreads, setThreadsLoading]);
+
+  useEffect(() => {
+    if (!hasFetchedThreads || threadsLoading || !threadId) return;
+    if (threads.some((thread) => thread.thread_id === threadId)) return;
+    setThreadId(null);
+  }, [hasFetchedThreads, setThreadId, threadId, threads, threadsLoading]);
 
   return (
     <>

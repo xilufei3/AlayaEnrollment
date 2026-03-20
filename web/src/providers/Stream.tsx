@@ -4,6 +4,7 @@ import React, {
   ReactNode,
   useState,
   useEffect,
+  useMemo,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
@@ -20,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
+import { getClientHeaders } from "@/lib/device-id";
 import { resolveApiUrl } from "@/lib/resolve-api-url";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
@@ -51,11 +53,7 @@ async function checkGraphStatus(
 ): Promise<boolean> {
   try {
     const res = await fetch(`${apiUrl}/info`, {
-      ...(apiKey && {
-        headers: {
-          "X-Api-Key": apiKey,
-        },
-      }),
+      headers: getClientHeaders(apiKey),
     });
 
     return res.ok;
@@ -79,9 +77,11 @@ const StreamSession = ({
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
   const resolvedApiUrl = resolveApiUrl(apiUrl);
+  const defaultHeaders = useMemo(() => getClientHeaders(apiKey), [apiKey]);
   const streamValue = useTypedStream({
     apiUrl: resolvedApiUrl,
     apiKey: apiKey ?? undefined,
+    defaultHeaders,
     assistantId,
     threadId: threadId ?? null,
     onCustomEvent: (event, options) => {
@@ -114,7 +114,7 @@ const StreamSession = ({
         });
       }
     });
-  }, [apiKey, resolvedApiUrl]);
+  }, [apiKey, resolvedApiUrl, defaultHeaders]);
 
   return (
     <StreamContext.Provider value={streamValue}>

@@ -2,12 +2,12 @@
 import {
   FormEvent,
   ReactNode,
-  CSSProperties,
+  type CSSProperties,
   useEffect,
   useRef,
   useState,
 } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, type Transition } from "framer-motion";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { parseAsBoolean, useQueryState } from "nuqs";
 import { toast } from "sonner";
@@ -382,7 +382,7 @@ export function Thread() {
     (m) => m.type === "ai" || m.type === "tool",
   );
   const composerInsetLeft = isLargeScreen && chatHistoryOpen ? 320 : 0;
-  const historyPanelTransition = isLargeScreen
+  const historyPanelTransition: Transition = isLargeScreen
     ? { type: "spring", stiffness: 300, damping: 32 }
     : { duration: 0 };
   const contentCenterOffset =
