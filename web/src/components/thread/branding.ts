@@ -1,6 +1,7 @@
 export type QuickPrompt = {
   label: string;
   question: string;
+  hint: string;
 };
 
 export const BRAND_COPY = {
@@ -8,7 +9,7 @@ export const BRAND_COPY = {
   subtitle:
     "面向高中生与家长的招生咨询助手，可快速了解学校概况、综合评价、专业培养与校园生活。",
   description:
-    "你可以直接提问，也可以从下方推荐问题开始。涉及具体政策和时间节点时，请以南科大当年官方通知为准。",
+    "你好，欢迎咨询南科大招生。你可以直接提问，也可以从下方热门问题开始，快速进入报名、专业和校园生活等高频主题。",
   historyTitle: "咨询记录",
   historySubtitle: "查看最近的招生咨询对话",
   composerPlaceholder: "例如：南科大综合评价 631 模式怎么报名？",
@@ -44,25 +45,31 @@ export const QUICK_PROMPTS: QuickPrompt[] = [
   {
     label: "综合评价报名",
     question: "南科大综合评价 631 模式怎么报名？有哪些关键时间点？",
+    hint: "适合先了解报名路径、材料准备与时间节点。",
   },
   {
     label: "本科专业方向",
     question: "南科大有哪些本科专业？各自更适合什么样的学生？",
+    hint: "快速对比专业方向、培养侧重和适配人群。",
   },
   {
     label: "书院与宿舍",
     question: "南科大的书院制和宿舍生活是怎样的？",
+    hint: "想先感受校园氛围和居住体验时可以从这里开始。",
   },
   {
     label: "培养特色",
     question: "南科大小班教学、导师制和本科科研具体体现在哪里？",
+    hint: "了解课程体验、导师支持和本科科研机会。",
   },
   {
     label: "录取省份政策",
     question: "如果我是广东考生，报考南科大时需要重点关注哪些招生政策？",
+    hint: "适合结合本省政策、批次安排和报考策略来问。",
   },
   {
     label: "毕业去向",
     question: "南科大本科毕业后的深造和就业去向整体怎么样？",
+    hint: "从升学去向、科研深造到就业表现做整体判断。",
   },
 ];

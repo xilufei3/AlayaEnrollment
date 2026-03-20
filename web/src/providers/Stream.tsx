@@ -169,7 +169,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
             <div className="space-y-5">
               <SustechMark className="h-16 w-16 border-white/15 bg-white/10 shadow-none" />
               <div className="space-y-3">
-                <p className="text-xs uppercase tracking-[0.35em] text-white/70">
+                <p className="text-xs tracking-[0.18em] text-white/70">
                   SUSTech Admissions
                 </p>
                 <h1 className="font-serif text-3xl leading-tight">
@@ -195,7 +195,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
               <div className="mb-4 flex items-center gap-3 lg:hidden">
                 <SustechMark className="h-12 w-12" />
                 <div className="min-w-0">
-                  <p className="text-xs uppercase tracking-[0.28em] text-primary/70">
+                  <p className="text-xs tracking-[0.18em] text-primary/70">
                     SUSTech Admissions
                   </p>
                   <h1 className="font-serif text-2xl text-foreground">
