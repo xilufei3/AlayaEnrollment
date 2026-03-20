@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Any, Iterator
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 try:
@@ -81,6 +82,51 @@ def _error_code(exc: Exception) -> str:
     return "INTERNAL_ERROR"
 
 
+def _get_device_id(request: Request) -> str:
+    raw = request.headers.get("x-device-id", "").strip()
+    return raw or "anonymous"
+
+
+def _thread_metadata_for_request(
+    request: Request,
+    assistant_id: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    merged = dict(metadata or {})
+    merged["graph_id"] = assistant_id
+    merged["device_id"] = _get_device_id(request)
+    return merged
+
+
+def _thread_metadata(state: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(state, dict):
+        return {}
+    metadata = state.get("metadata", {})
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _thread_exists(state: dict[str, Any] | None) -> bool:
+    if not isinstance(state, dict):
+        return False
+    return bool(state.get("created_at") or _thread_metadata(state) or state.get("values"))
+
+
+def _get_owned_thread_state(
+    rt: AdmissionGraphRuntime,
+    request: Request,
+    thread_id: str,
+) -> dict[str, Any]:
+    state = rt.get_thread_state(thread_id=thread_id)
+    if not _thread_exists(state):
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    metadata = _thread_metadata(state)
+    if metadata.get("device_id") != _get_device_id(request):
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    return state
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="AlayaAgent Chat API", version="0.2.0")
     app.add_middleware(
@@ -101,6 +147,7 @@ def create_app() -> FastAPI:
     )
     app.state.runtime = runtime
     app.state.startup_error = None
+    app.state.api_shared_key = ""
 
     def _runtime_or_503() -> AdmissionGraphRuntime:
         if app.state.startup_error is not None:
@@ -109,6 +156,7 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def _startup() -> None:
+        app.state.api_shared_key = os.getenv("API_SHARED_KEY", "").strip()
         try:
             runtime.startup()
             app.state.startup_error = None
@@ -118,6 +166,23 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     def _shutdown() -> None:
         runtime.shutdown()
+
+    @app.middleware("http")
+    async def require_shared_key(request: Request, call_next):
+        shared_key = app.state.api_shared_key
+        if not shared_key:
+            return await call_next(request)
+
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
+        if request.url.path in {"/health", "/info"}:
+            return await call_next(request)
+
+        if request.headers.get("x-api-key", "") != shared_key:
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+        return await call_next(request)
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -136,39 +201,60 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/threads")
-    def create_thread(req: ThreadCreateRequest) -> dict[str, Any]:
+    def create_thread(req: ThreadCreateRequest, request: Request) -> dict[str, Any]:
         rt = _runtime_or_503()
-        metadata = dict(req.metadata or {})
-        metadata.setdefault("graph_id", "agent")
+        metadata = _thread_metadata_for_request(request, "agent", req.metadata)
         return rt.create_thread(thread_id=req.thread_id, metadata=metadata)
 
     @app.get("/threads/{thread_id}")
-    def get_thread(thread_id: str) -> dict[str, Any]:
+    def get_thread(thread_id: str, request: Request) -> dict[str, Any]:
         rt = _runtime_or_503()
-        return rt.create_thread(thread_id=thread_id)
+        state = _get_owned_thread_state(rt, request, thread_id)
+        return {
+            "thread_id": thread_id,
+            "created_at": state.get("created_at"),
+            "updated_at": state.get("created_at"),
+            "state_updated_at": state.get("created_at"),
+            "metadata": _thread_metadata(state),
+            "status": "idle",
+            "values": state.get("values", {}) if isinstance(state.get("values"), dict) else {},
+            "interrupts": {},
+        }
 
     @app.post("/threads/search")
-    def search_threads(req: ThreadSearchRequest) -> list[dict[str, Any]]:
+    def search_threads(req: ThreadSearchRequest, request: Request) -> list[dict[str, Any]]:
         rt = _runtime_or_503()
-        return rt.search_threads(metadata=req.metadata, limit=req.limit, offset=req.offset)
+        metadata = dict(req.metadata or {})
+        metadata["device_id"] = _get_device_id(request)
+        return rt.search_threads(metadata=metadata, limit=req.limit, offset=req.offset)
 
     @app.get("/threads/{thread_id}/state")
-    def get_thread_state(thread_id: str) -> dict[str, Any]:
+    def get_thread_state(thread_id: str, request: Request) -> dict[str, Any]:
         rt = _runtime_or_503()
-        rt.create_thread(thread_id=thread_id)
+        _get_owned_thread_state(rt, request, thread_id)
         return rt.get_thread_state(thread_id=thread_id)
 
     @app.post("/threads/{thread_id}/history")
-    def get_thread_history(thread_id: str, req: ThreadHistoryRequest) -> list[dict[str, Any]]:
+    def get_thread_history(
+        thread_id: str,
+        req: ThreadHistoryRequest,
+        request: Request,
+    ) -> list[dict[str, Any]]:
         rt = _runtime_or_503()
-        rt.create_thread(thread_id=thread_id)
+        _get_owned_thread_state(rt, request, thread_id)
         return rt.get_thread_history(thread_id=thread_id, limit=req.limit)
 
     @app.post("/threads/{thread_id}/runs/stream")
-    def stream_run_with_thread(thread_id: str, req: RunStreamRequest) -> StreamingResponse:
+    def stream_run_with_thread(
+        thread_id: str,
+        req: RunStreamRequest,
+        request: Request,
+    ) -> StreamingResponse:
         rt = _runtime_or_503()
         assistant_id = (req.assistant_id or "agent").strip() or "agent"
-        rt.create_thread(thread_id=thread_id, metadata={"graph_id": assistant_id})
+        metadata = _thread_metadata_for_request(request, assistant_id, req.metadata)
+        _get_owned_thread_state(rt, request, thread_id)
+        rt.create_thread(thread_id=thread_id, metadata=metadata)
         run_id, event_source = rt.stream_langgraph_events(
             thread_id=thread_id,
             input_payload=req.input,
@@ -191,10 +277,16 @@ def create_app() -> FastAPI:
         return StreamingResponse(event_iter(), media_type="text/event-stream", headers=headers)
 
     @app.post("/runs/stream")
-    def stream_run_without_thread(req: RunStreamRequest) -> StreamingResponse:
+    def stream_run_without_thread(
+        req: RunStreamRequest,
+        request: Request,
+    ) -> StreamingResponse:
         rt = _runtime_or_503()
         assistant_id = (req.assistant_id or "agent").strip() or "agent"
-        thread = rt.create_thread(thread_id=str(uuid4()), metadata={"graph_id": assistant_id})
+        thread = rt.create_thread(
+            thread_id=str(uuid4()),
+            metadata=_thread_metadata_for_request(request, assistant_id, req.metadata),
+        )
         thread_id = str(thread["thread_id"])
         run_id, event_source = rt.stream_langgraph_events(
             thread_id=thread_id,
