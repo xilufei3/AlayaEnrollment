@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Union
 
@@ -16,6 +17,10 @@ class JinaRerankerComponent:
     def __init__(self, *, model_id: str, top_n: Optional[int] = None) -> None:
         self.model_id = model_id
         self.top_n = top_n
+        self._bind_kwargs: Dict[str, Any] = {}
+        if self.top_n is not None:
+            self._bind_kwargs["top_n"] = int(self.top_n)
+        self._reranker: Any | None = None
 
     def _to_documents(
         self,
@@ -37,12 +42,11 @@ class JinaRerankerComponent:
         return out
 
     def _get_reranker(self) -> Any:
-        bind_kwargs: Dict[str, Any] = {}
-        if self.top_n is not None:
-            bind_kwargs["top_n"] = int(self.top_n)
-        return get_model(self.model_id, **bind_kwargs)
+        if self._reranker is None:
+            self._reranker = get_model(self.model_id, **self._bind_kwargs)
+        return self._reranker
 
-    def __call__(
+    async def __call__(
         self,
         *,
         query: str,
@@ -58,9 +62,11 @@ class JinaRerankerComponent:
             )
             return documents
 
-        reranked_docs: List[Document] = reranker.compress_documents(
-            documents=documents,
-            query=query,
+        reranked_docs: List[Document] = await asyncio.to_thread(
+            lambda: reranker.compress_documents(
+                documents=documents,
+                query=query,
+            )
         )
         logger.debug(
             "JinaReranker done.\n"
@@ -73,7 +79,12 @@ class JinaRerankerComponent:
 
 
 def create_rerank_node():
-    def rerank_node(state: RAGState) -> dict[str, Any]:
+    reranker = JinaRerankerComponent(
+        model_id=config.rerank.model_id,
+        top_n=config.rerank.top_n,
+    )
+
+    async def rerank_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
         chunks = list(state.get("chunks") or [])
 
@@ -84,8 +95,7 @@ def create_rerank_node():
             return {"chunks": chunks}
 
         try:
-            reranker = JinaRerankerComponent(model_id=config.rerank.model_id, top_n=config.rerank.top_n)
-            reranked = reranker(query=query, docs=chunks)
+            reranked = await reranker(query=query, docs=chunks)
             logger.debug(f"Rerank done. in={len(chunks)} out={len(reranked)}")
             return {"chunks": reranked}
         except Exception as exc:

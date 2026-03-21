@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from typing import Any
 
 from langchain_core.documents import Document
 
-from ....config.settings import REQUIRED_SLOTS_BY_INTENT
 from ...llm import get_model
 from ...prompts import SUFFICIENCY_EVAL_SYSTEM_PROMPT
 from ..schemas import RAGState
@@ -31,12 +30,13 @@ class SufficiencyEvaluator:
     def __init__(self, *, model_id: str) -> None:
         self.model_id = model_id
 
-    def evaluate(
+    async def evaluate(
         self,
         *,
         query: str,
         intent: str,
         slots: dict[str, str],
+        required_slots: list[str],
         chunks: list[Document],
     ) -> dict[str, Any]:
         # 快速规则：空文档直接 insufficient_docs
@@ -48,11 +48,16 @@ class SufficiencyEvaluator:
             }
 
         # 快速规则：已满足所需槽位 且 有足够文档 → sufficient（减少 LLM 调用）
-        required = REQUIRED_SLOTS_BY_INTENT.get(intent, [])
-        slots_ok = all(slots.get(s, "").strip() for s in required)
+        slots_ok = all(slots.get(s, "").strip() for s in required_slots)
         if slots_ok and len(chunks) >= 2:
             try:
-                return self._llm_evaluate(query=query, intent=intent, slots=slots, chunks=chunks)
+                return await self._llm_evaluate(
+                    query=query,
+                    intent=intent,
+                    slots=slots,
+                    required_slots=required_slots,
+                    chunks=chunks,
+                )
             except Exception as exc:
                 logger.warning(f"SufficiencyEval LLM failed, fallback to sufficient. {exc}")
                 return {
@@ -62,7 +67,7 @@ class SufficiencyEvaluator:
                 }
 
         if not slots_ok:
-            missing = [name for name in required if not slots.get(name, "").strip()]
+            missing = [name for name in required_slots if not slots.get(name, "").strip()]
             return {
                 "eval_result": "missing_slots",
                 "missing_slots": missing,
@@ -71,7 +76,13 @@ class SufficiencyEvaluator:
 
         # 只有 1 条文档，尝试 LLM 评估
         try:
-            return self._llm_evaluate(query=query, intent=intent, slots=slots, chunks=chunks)
+            return await self._llm_evaluate(
+                query=query,
+                intent=intent,
+                slots=slots,
+                required_slots=required_slots,
+                chunks=chunks,
+            )
         except Exception as exc:
             logger.warning(f"SufficiencyEval LLM failed, fallback to sufficient. {exc}")
             return {
@@ -80,12 +91,13 @@ class SufficiencyEvaluator:
                 "eval_reason": "LLM eval failed, fallback",
             }
 
-    def _llm_evaluate(
+    async def _llm_evaluate(
         self,
         *,
         query: str,
         intent: str,
         slots: dict[str, str],
+        required_slots: list[str],
         chunks: list[Document],
     ) -> dict[str, Any]:
         model = get_model(self.model_id)
@@ -93,10 +105,11 @@ class SufficiencyEvaluator:
             f"用户问题：{query}\n"
             f"意图：{intent}\n"
             f"已知信息：{json.dumps(slots, ensure_ascii=False)}\n"
+            f"当前问题真正依赖的槽位：{json.dumps(required_slots, ensure_ascii=False)}\n"
             f"可用材料摘要：\n{_chunk_summary(chunks)}\n"
             "请评估这些材料是否足以直接回答用户。"
         )
-        response = model.invoke(
+        response = await model.ainvoke(
             [("system", SUFFICIENCY_EVAL_SYSTEM_PROMPT), ("user", user_prompt)],
             response_format={"type": "json_object"},
         )
@@ -120,10 +133,11 @@ class SufficiencyEvaluator:
 def create_sufficiency_eval_node(*, model_id: str | None = None):
     evaluator = SufficiencyEvaluator(model_id=model_id or "eval")
 
-    def sufficiency_eval_node(state: RAGState) -> dict[str, Any]:
+    async def sufficiency_eval_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
         intent = str(state.get("intent") or "").strip()
         slots = dict(state.get("slots") or {})
+        required_slots = list(state.get("required_slots") or [])
         chunks = list(state.get("chunks") or [])
         iteration = int(state.get("rag_iteration") or 0)
         max_iter = int(state.get("max_iterations") or 2)
@@ -137,7 +151,13 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
                 "eval_reason": "max_iterations reached",
             }
 
-        result = evaluator.evaluate(query=query, intent=intent, slots=slots, chunks=chunks)
+        result = await evaluator.evaluate(
+            query=query,
+            intent=intent,
+            slots=slots,
+            required_slots=required_slots,
+            chunks=chunks,
+        )
         logger.debug(
             "SufficiencyEval done.\n"
             f"intent={intent}\n"

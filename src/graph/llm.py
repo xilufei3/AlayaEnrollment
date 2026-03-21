@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
+from threading import Lock
 from typing import Any
 
 from langchain_community.document_compressors import JinaRerank
@@ -38,6 +40,9 @@ NODE_MODEL_KIND_MAP: dict[str, str] = {
 }
 
 _MODEL_CACHE: dict[tuple[str, str], Any] = {}
+_MODEL_CACHE_LOCK = Lock()
+_MODEL_CONFIGS_CACHE: dict[str, dict[str, Any]] | None = None
+_MODEL_CONFIGS_LOCK = Lock()
 
 
 def _env_str(name: str, default: str) -> str:
@@ -91,7 +96,7 @@ def _build_openai_spec(
     return spec
 
 
-def build_model_configs() -> dict[str, dict[str, Any]]:
+def _build_model_configs_from_env() -> dict[str, dict[str, Any]]:
     return {
         "intent": _build_openai_spec(
             prefix="INTENT_MODEL",
@@ -122,12 +127,36 @@ def build_model_configs() -> dict[str, dict[str, Any]]:
     }
 
 
+def _get_cached_model_configs() -> dict[str, dict[str, Any]]:
+    global _MODEL_CONFIGS_CACHE
+
+    cached = _MODEL_CONFIGS_CACHE
+    if cached is not None:
+        return cached
+
+    with _MODEL_CONFIGS_LOCK:
+        cached = _MODEL_CONFIGS_CACHE
+        if cached is None:
+            cached = _build_model_configs_from_env()
+            _MODEL_CONFIGS_CACHE = cached
+    return cached
+
+
+def build_model_configs() -> dict[str, dict[str, Any]]:
+    return deepcopy(_get_cached_model_configs())
+
+
 def get_model_configs() -> dict[str, dict[str, Any]]:
     return build_model_configs()
 
 
 def reset_model_cache() -> None:
-    _MODEL_CACHE.clear()
+    global _MODEL_CONFIGS_CACHE
+
+    with _MODEL_CACHE_LOCK:
+        _MODEL_CACHE.clear()
+    with _MODEL_CONFIGS_LOCK:
+        _MODEL_CONFIGS_CACHE = None
 
 
 def _freeze_overrides(overrides: dict[str, Any]) -> str:
@@ -138,8 +167,9 @@ def _freeze_overrides(overrides: dict[str, Any]) -> str:
 
 def _resolve_model_kind_only(kind: str) -> str:
     resolved = MODEL_KIND_ALIASES.get(kind, kind)
-    if resolved not in build_model_configs():
-        supported = ", ".join(sorted(build_model_configs().keys()))
+    model_configs = _get_cached_model_configs()
+    if resolved not in model_configs:
+        supported = ", ".join(sorted(model_configs.keys()))
         raise KeyError(f"Unknown model kind '{kind}'. Supported kinds: {supported}")
     return resolved
 
@@ -154,7 +184,7 @@ def resolve_model_kind(node_name_or_kind: str | None = None) -> str:
     if normalized in NODE_MODEL_KIND_MAP:
         return NODE_MODEL_KIND_MAP[normalized]
 
-    model_configs = build_model_configs()
+    model_configs = _get_cached_model_configs()
     if normalized in model_configs:
         return normalized
 
@@ -192,14 +222,20 @@ def _build_model(spec: dict[str, Any]) -> Any:
 def get_model(kind: str, **overrides: Any) -> Any:
     resolved_kind = _resolve_model_kind_only(kind)
     cache_key = (resolved_kind, _freeze_overrides(overrides))
-    if cache_key in _MODEL_CACHE:
-        return _MODEL_CACHE[cache_key]
+    cached = _MODEL_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
 
-    spec = dict(build_model_configs()[resolved_kind])
-    spec.update(overrides)
-    model = _build_model(spec)
-    _MODEL_CACHE[cache_key] = model
-    return model
+    with _MODEL_CACHE_LOCK:
+        cached = _MODEL_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        spec = dict(_get_cached_model_configs()[resolved_kind])
+        spec.update(overrides)
+        model = _build_model(spec)
+        _MODEL_CACHE[cache_key] = model
+        return model
 
 
 def get_llm(node_name_or_kind: str | None = None, **overrides: Any) -> Any:

@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from ...llm import get_model
 from ...prompts import SEARCH_PLANNER_SYSTEM_PROMPT
+from ...utils import (
+    chunk_texts as shared_chunk_texts,
+    query_prefers_year_range as shared_query_prefers_year_range,
+)
 from ..schemas import RAGState, SQLPlan, SearchPlan
 
 logger = logging.getLogger(__name__)
@@ -21,6 +26,13 @@ _INTENT_TOP_K: dict[str, int] = {
 }
 _DEFAULT_TOP_K = 8
 _DEFAULT_SQL_LIMIT = 6
+_YEAR_RANGE_HINTS: tuple[str, ...] = (
+    "近几年",
+    "近年来",
+    "历年",
+    "往年",
+    "最近几年",
+)
 
 
 def _get_top_k(intent: str, iteration: int) -> int:
@@ -33,7 +45,6 @@ def _get_top_k(intent: str, iteration: int) -> int:
 
 class SearchPlanLLMOutput(BaseModel):
     rewritten_query: str = Field(..., description="改写后的主查询")
-    sub_queries: list[str] = Field(default_factory=list, description="子问题列表")
     reason: str = Field(default="", description="规划理由")
 
 
@@ -72,13 +83,29 @@ def _build_sql_plan(intent: str) -> SQLPlan:
     }
 
 
-def _llm_plan(
+def _query_prefers_year_range(query: str) -> bool:
+    return shared_query_prefers_year_range(query)
+
+
+def _mask_slots_for_query(query: str, slots: dict[str, str]) -> dict[str, str]:
+    effective_slots = dict(slots)
+    if _query_prefers_year_range(query):
+        effective_slots.pop("year", None)
+    return effective_slots
+
+
+def _chunk_texts(chunks: list[Any]) -> list[str]:
+    return shared_chunk_texts(chunks)
+
+
+async def _llm_plan(
     model_id: str,
     query: str,
     intent: str,
     slots: dict[str, str],
     iteration: int,
     eval_reason: str,
+    chunks: list[Any] | None = None,
 ) -> SearchPlan:
     """调用 LLM 生成检索参数，策略固定为 vector_keyword_hybrid。"""
     model = get_model(model_id)
@@ -90,10 +117,13 @@ def _llm_plan(
     ]
     if eval_reason.strip():
         user_parts.append(f"上一轮评估理由：{eval_reason.strip()}")
+    chunk_texts = _chunk_texts(list(chunks or []))
+    if chunk_texts:
+        user_parts.append("上一轮召回 chunk 原文：\n" + "\n".join(chunk_texts))
     user_parts.append("请输出检索参数 JSON。")
     user_prompt = "\n".join(user_parts)
 
-    response = model.invoke(
+    response = await model.ainvoke(
         [("system", SEARCH_PLANNER_SYSTEM_PROMPT), ("user", user_prompt)],
         response_format={"type": "json_object"},
     )
@@ -105,16 +135,13 @@ def _llm_plan(
 
     out = SearchPlanLLMOutput(
         rewritten_query=str(data.get("rewritten_query", query)).strip() or query,
-        sub_queries=list(data.get("sub_queries") or []),
         reason=str(data.get("reason", "")).strip(),
     )
     top_k_final = _get_top_k(intent, iteration)
-    sub_queries_final = out.sub_queries if out.sub_queries else [out.rewritten_query]
 
     plan: SearchPlan = {
         "strategy": "vector_keyword_hybrid",
         "vector_query": out.rewritten_query,
-        "sub_queries": sub_queries_final,
         "top_k": top_k_final,
     }
     logger.debug(
@@ -129,24 +156,27 @@ def _llm_plan(
 def create_search_planner_node(*, model_id: str | None = None):
     """创建检索策略节点。model_id 存在时使用 LLM 生成参数，否则或失败时用规则兜底。"""
 
-    def search_planner_node(state: RAGState) -> dict:
+    async def search_planner_node(state: RAGState) -> dict:
         query = str(state.get("query") or "").strip()
         intent = str(state.get("intent") or "").strip()
         slots = dict(state.get("slots") or {})
+        effective_slots = _mask_slots_for_query(query, slots)
         iteration = int(state.get("rag_iteration") or 0)
         eval_reason = str(state.get("eval_reason") or "")
+        chunks = list(state.get("chunks") or [])
 
         planner_model_kind = model_id or "planner"
 
         if query:
             try:
-                plan = _llm_plan(
+                plan = await _llm_plan(
                     model_id=planner_model_kind,
                     query=query,
                     intent=intent,
-                    slots=slots,
+                    slots=effective_slots,
                     iteration=iteration,
                     eval_reason=eval_reason,
+                    chunks=chunks,
                 )
             except Exception as exc:
                 logger.warning(

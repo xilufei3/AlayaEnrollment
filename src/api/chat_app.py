@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Annotated, Any, Iterator
+from typing import Annotated, Any, AsyncIterator
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
@@ -22,6 +23,20 @@ from ..runtime.graph_runtime import AdmissionGraphRuntime, RuntimeConfig
 def _sse(event: str, data: Any) -> str:
     payload = json.dumps(data, ensure_ascii=False)
     return f"event: {event}\ndata: {payload}\n\n"
+
+
+def _cors_json_response(
+    request: Request,
+    *,
+    status_code: int,
+    content: Any,
+) -> JSONResponse:
+    response = JSONResponse(status_code=status_code, content=content)
+    origin = request.headers.get("origin", "").strip()
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Vary"] = "Origin"
+    return response
 
 
 class ChatStreamRequest(BaseModel):
@@ -84,7 +99,9 @@ def _error_code(exc: Exception) -> str:
 
 def _get_device_id(request: Request) -> str:
     raw = request.headers.get("x-device-id", "").strip()
-    return raw or "anonymous"
+    if raw:
+        return raw
+    raise HTTPException(status_code=400, detail="X-Device-Id header is required")
 
 
 def _thread_metadata_for_request(
@@ -155,17 +172,17 @@ def create_app() -> FastAPI:
         return app.state.runtime
 
     @app.on_event("startup")
-    def _startup() -> None:
+    async def _startup() -> None:
         app.state.api_shared_key = os.getenv("API_SHARED_KEY", "").strip()
         try:
-            runtime.startup()
+            await runtime.startup()
             app.state.startup_error = None
         except Exception as exc:
             app.state.startup_error = exc
 
     @app.on_event("shutdown")
-    def _shutdown() -> None:
-        runtime.shutdown()
+    async def _shutdown() -> None:
+        await runtime.shutdown()
 
     @app.middleware("http")
     async def require_shared_key(request: Request, call_next):
@@ -180,7 +197,11 @@ def create_app() -> FastAPI:
             return await call_next(request)
 
         if request.headers.get("x-api-key", "") != shared_key:
-            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+            return _cors_json_response(
+                request,
+                status_code=401,
+                content={"detail": "Unauthorized"},
+            )
 
         return await call_next(request)
 
@@ -198,6 +219,7 @@ def create_app() -> FastAPI:
             "version": "0.2.0",
             "runtime_ready": app.state.startup_error is None,
             "assistant_id": "agent",
+            "api_key_required": bool(app.state.api_shared_key),
         }
 
     @app.post("/threads")
@@ -245,7 +267,7 @@ def create_app() -> FastAPI:
         return rt.get_thread_history(thread_id=thread_id, limit=req.limit)
 
     @app.post("/threads/{thread_id}/runs/stream")
-    def stream_run_with_thread(
+    async def stream_run_with_thread(
         thread_id: str,
         req: RunStreamRequest,
         request: Request,
@@ -253,7 +275,7 @@ def create_app() -> FastAPI:
         rt = _runtime_or_503()
         assistant_id = (req.assistant_id or "agent").strip() or "agent"
         metadata = _thread_metadata_for_request(request, assistant_id, req.metadata)
-        _get_owned_thread_state(rt, request, thread_id)
+        await asyncio.to_thread(_get_owned_thread_state, rt, request, thread_id)
         rt.create_thread(thread_id=thread_id, metadata=metadata)
         run_id, event_source = rt.stream_langgraph_events(
             thread_id=thread_id,
@@ -261,9 +283,9 @@ def create_app() -> FastAPI:
             stream_mode=req.stream_mode,
         )
 
-        def event_iter() -> Iterator[str]:
+        async def event_iter() -> AsyncIterator[str]:
             try:
-                for event_name, payload in event_source:
+                async for event_name, payload in event_source:
                     yield _sse(event_name, payload)
             except Exception as exc:
                 yield _sse("error", {"code": _error_code(exc), "message": str(exc)})
@@ -277,7 +299,7 @@ def create_app() -> FastAPI:
         return StreamingResponse(event_iter(), media_type="text/event-stream", headers=headers)
 
     @app.post("/runs/stream")
-    def stream_run_without_thread(
+    async def stream_run_without_thread(
         req: RunStreamRequest,
         request: Request,
     ) -> StreamingResponse:
@@ -294,9 +316,9 @@ def create_app() -> FastAPI:
             stream_mode=req.stream_mode,
         )
 
-        def event_iter() -> Iterator[str]:
+        async def event_iter() -> AsyncIterator[str]:
             try:
-                for event_name, payload in event_source:
+                async for event_name, payload in event_source:
                     yield _sse(event_name, payload)
             except Exception as exc:
                 yield _sse("error", {"code": _error_code(exc), "message": str(exc)})
@@ -310,7 +332,7 @@ def create_app() -> FastAPI:
         return StreamingResponse(event_iter(), media_type="text/event-stream", headers=headers)
 
     @app.post("/api/chat/stream")
-    def chat_stream(req: ChatStreamRequest) -> StreamingResponse:
+    async def chat_stream(req: ChatStreamRequest) -> StreamingResponse:
         rt = _runtime_or_503()
         session_id = req.session_id.strip()
         message = req.message.strip()
@@ -320,9 +342,9 @@ def create_app() -> FastAPI:
         if not message:
             raise HTTPException(status_code=400, detail="message is required")
 
-        def event_iter() -> Iterator[str]:
+        async def event_iter() -> AsyncIterator[str]:
             try:
-                for evt in rt.stream_stage_events(session_id=session_id, message=message):
+                async for evt in rt.stream_stage_events(session_id=session_id, message=message):
                     data = dict(evt["data"])
                     if trace_id:
                         data["trace_id"] = trace_id

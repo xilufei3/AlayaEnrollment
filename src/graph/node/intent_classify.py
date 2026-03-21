@@ -4,7 +4,7 @@ import logging
 import json
 from typing import Any, Sequence
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.runtime import Runtime
@@ -15,27 +15,64 @@ from ...config.settings import (
     DEFAULT_FALLBACK_INTENT,
     HISTORY_LAST_K_TURNS,
     INTENT_DESCRIPTIONS,
-    REQUIRED_SLOTS_BY_INTENT,
     SLOT_DESCRIPTIONS,
 )
 from ..llm import get_model
 from ..prompts import INTENT_CLASSIFIER_SYSTEM_PROMPT_TEMPLATE
 from ..state import WorkflowState
+from ..utils import (
+    extract_query_from_state as shared_extract_query_from_state,
+    normalize_messages as shared_normalize_messages,
+    to_text as shared_to_text,
+)
 
 
 logger = logging.getLogger(__name__)
+GLOBAL_SLOT_NAMES: tuple[str, ...] = ("province", "year")
 
 class IntentClassificationResult(BaseModel):
     intent: str = Field(..., description="intent label")
     reason: str = Field(..., description="short reason")
     confidence: float = Field(..., ge=0.0, le=1.0)
     slots: dict[str, str] = Field(default_factory=dict, description="extracted slots: province, year")
+    required_slots: list[str] = Field(
+        default_factory=list,
+        description="query-aware slots needed for a more precise answer",
+    )
 
 
-def get_missing_slots_for_intent(intent: str, slots: dict[str, str]) -> list[str]:
-    required = REQUIRED_SLOTS_BY_INTENT.get(intent, [])
+def normalize_slots(raw_slots: Any) -> dict[str, str]:
+    if not isinstance(raw_slots, dict):
+        return {}
+
+    slots: dict[str, str] = {}
+    for raw_name, value in raw_slots.items():
+        name = str(raw_name).strip().lower()
+        if name not in GLOBAL_SLOT_NAMES:
+            continue
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            slots[name] = text
+    return slots
+
+
+def normalize_required_slots(raw_required_slots: Any) -> list[str]:
+    if not isinstance(raw_required_slots, list):
+        return []
+
+    required_slots: list[str] = []
+    for item in raw_required_slots:
+        name = str(item).strip().lower()
+        if name in GLOBAL_SLOT_NAMES and name not in required_slots:
+            required_slots.append(name)
+    return required_slots
+
+
+def get_missing_slots_for_query(*, required_slots: Sequence[str], slots: dict[str, str]) -> list[str]:
     missing: list[str] = []
-    for name in required:
+    for name in required_slots:
         value = str(slots.get(name, "")).strip()
         if not value:
             missing.append(name)
@@ -55,7 +92,7 @@ class EnrollmentIntentClassifier:
             return value
         return DEFAULT_FALLBACK_INTENT.value
 
-    def classify(
+    async def classify(
         self,
         *,
         query: str,
@@ -76,7 +113,7 @@ class EnrollmentIntentClassifier:
             *history,
             HumanMessage(content=user_tail),
         ]
-        response = model.invoke(messages, response_format={"type": "json_object"})
+        response = await model.ainvoke(messages, response_format={"type": "json_object"})
         data = self._parser.parse(response.content)
 
         if not isinstance(data, dict):
@@ -90,56 +127,25 @@ class EnrollmentIntentClassifier:
             confidence = 0.0
         confidence = max(0.0, min(1.0, confidence))
 
-        raw_slots = data.get("slots")
-        if isinstance(raw_slots, dict):
-            slots = {k: str(v).strip() for k, v in raw_slots.items() if v and str(v).strip()}
-        else:
-            slots = {}
+        slots = normalize_slots(data.get("slots"))
+        required_slots = normalize_required_slots(data.get("required_slots"))
 
         return IntentClassificationResult(
             intent=intent,
             reason=reason,
             confidence=confidence,
             slots=slots,
+            required_slots=required_slots,
         )
 
 
 def _to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and "text" in item:
-                parts.append(str(item["text"]))
-            else:
-                parts.append(str(item))
-        return " ".join([part for part in parts if part]).strip()
-    if content is None:
-        return ""
-    return str(content).strip()
+    return shared_to_text(content)
 
 
 def _normalize_conversation_messages(raw: Sequence[Any]) -> list[BaseMessage]:
     """把对话上下文转为 BaseMessage 列表，供模型多轮调用。"""
-    out: list[BaseMessage] = []
-    for msg in raw:
-        if isinstance(msg, BaseMessage):
-            out.append(msg)
-            continue
-        if not isinstance(msg, dict):
-            continue
-        role = str(msg.get("role", msg.get("type", ""))).lower()
-        content = _to_text(msg.get("content", ""))
-        if not content:
-            continue
-        if role in ("user", "human"):
-            out.append(HumanMessage(content=content))
-        elif role in ("assistant", "ai"):
-            out.append(AIMessage(content=content))
-    return out
+    return shared_normalize_messages(raw)
 
 
 def _get_recent_messages(state: WorkflowState, max_turns: int | None = None) -> list[Any]:
@@ -155,36 +161,19 @@ def _get_recent_messages(state: WorkflowState, max_turns: int | None = None) -> 
 
 
 def _extract_query_from_state(state: WorkflowState) -> str:
-    query = state.get("query")
-    if query:
-        return str(query).strip()
-
-    messages = state.get("messages") or []
-    for msg in reversed(messages):
-        if isinstance(msg, BaseMessage):
-            if getattr(msg, "type", "") in ("human", "user"):
-                text = _to_text(getattr(msg, "content", ""))
-                if text:
-                    return text
-        elif isinstance(msg, dict):
-            role = str(msg.get("role", "")).lower()
-            if role in ("user", "human"):
-                text = _to_text(msg.get("content", ""))
-                if text:
-                    return text
-    return ""
+    return shared_extract_query_from_state(state)
 
 
 def create_intent_classify_node(*, model_id: str | None = None):
     classifier = EnrollmentIntentClassifier(model_id=model_id)
 
-    def intent_classify_node(state: WorkflowState, runtime: Runtime[Any]):
+    async def intent_classify_node(state: WorkflowState, runtime: Runtime[Any]):
         query = _extract_query_from_state(state)
         conversation_context = _get_recent_messages(state)
 
         try:
             runtime_model_id = getattr(getattr(runtime, "context", None), "chat_model_id", None)
-            result = classifier.classify(
+            result = await classifier.classify(
                 query=query,
                 conversation_context=conversation_context,
                 model_id=runtime_model_id,
@@ -192,31 +181,35 @@ def create_intent_classify_node(*, model_id: str | None = None):
             intent = result.intent
             confidence = result.confidence
             slots = dict(result.slots or {})
+            required_slots = list(result.required_slots or [])
             logger.debug(
                 "Intent classified.\n"
                 f"intent={result.intent}\n"
                 f"confidence={result.confidence:.2f}\n"
                 f"reason={result.reason}\n"
-                f"slots={slots}"
+                f"slots={slots}\n"
+                f"required_slots={required_slots}"
             )
         except Exception as exc:
             intent = DEFAULT_FALLBACK_INTENT.value
             confidence = 0.0
             slots = {}
+            required_slots = []
             logger.warning(
                 "Intent classify failed, use fallback.\n"
                 f"error={type(exc).__name__}: {exc}\n"
                 f"fallback_intent={intent}"
             )
 
-        merged_slots = dict(state.get("slots") or {})
+        merged_slots = normalize_slots(state.get("slots") or {})
         merged_slots.update(slots)
-        missing_slots = get_missing_slots_for_intent(intent, merged_slots)
+        missing_slots = get_missing_slots_for_query(required_slots=required_slots, slots=merged_slots)
         return {
             "query": query,
             "intent": intent,
             "confidence": confidence,
             "slots": merged_slots,
+            "required_slots": required_slots,
             "missing_slots": missing_slots,
         }
 

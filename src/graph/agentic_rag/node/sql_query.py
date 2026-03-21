@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -7,11 +8,19 @@ from typing import Any
 from langchain_core.documents import Document
 
 from ....knowledge import query_admission_scores
+from ...utils import query_prefers_year_range as shared_query_prefers_year_range
 from ..schemas import RAGState, SQLPlan
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SQL_LIMIT = 6
+_YEAR_RANGE_HINTS: tuple[str, ...] = (
+    "近几年",
+    "近年来",
+    "历年",
+    "往年",
+    "最近几年",
+)
 
 
 def _optional_text(value: Any) -> str | None:
@@ -32,8 +41,13 @@ def _row_to_document(row: dict[str, Any], index: int) -> Document:
     )
 
 
+def _query_prefers_year_range(query: str) -> bool:
+    return shared_query_prefers_year_range(query)
+
+
 def create_sql_query_node():
-    def sql_query_node(state: RAGState) -> dict[str, Any]:
+    async def sql_query_node(state: RAGState) -> dict[str, Any]:
+        query = str(state.get("query") or "").strip()
         intent = str(state.get("intent") or "").strip()
         if intent != "admission_policy":
             return {"structured_results": [], "structured_chunks": []}
@@ -44,7 +58,10 @@ def create_sql_query_node():
 
         slots = dict(state.get("slots") or {})
         province = _optional_text(sql_plan.get("province")) or _optional_text(slots.get("province"))
-        year = _optional_text(sql_plan.get("year")) or _optional_text(slots.get("year"))
+        slot_year = _optional_text(slots.get("year"))
+        if _query_prefers_year_range(query):
+            slot_year = None
+        year = _optional_text(sql_plan.get("year")) or slot_year
 
         try:
             limit = int(sql_plan.get("limit") or _DEFAULT_SQL_LIMIT)
@@ -54,7 +71,9 @@ def create_sql_query_node():
             limit = _DEFAULT_SQL_LIMIT
 
         try:
-            rows = query_admission_scores(province=province, year=year, limit=limit)
+            rows = await asyncio.to_thread(
+                lambda: query_admission_scores(province=province, year=year, limit=limit)
+            )
         except Exception as exc:
             logger.error(f"SQL query error {type(exc).__name__}: {exc}")
             return {"structured_results": [], "structured_chunks": []}

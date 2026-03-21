@@ -8,7 +8,6 @@ from langchain_core.documents import Document
 class SearchPlan(TypedDict, total=False):
     strategy: Literal["vector_keyword_hybrid"]
     vector_query: str
-    sub_queries: list[str]
     top_k: int
 
 
@@ -25,6 +24,7 @@ class RAGState(TypedDict, total=False):
     query: str
     intent: str
     slots: dict[str, str]
+    required_slots: list[str]
 
     # Internal loop state
     search_plan: SearchPlan
@@ -34,6 +34,7 @@ class RAGState(TypedDict, total=False):
 
     # Retrieval intermediates
     vector_chunks: list[Document]
+    candidate_vector_chunks: list[Document]
     structured_chunks: list[Document]
     structured_results: list[dict[str, Any]]
 

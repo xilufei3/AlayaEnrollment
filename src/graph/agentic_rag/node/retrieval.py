@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -55,7 +56,7 @@ def _resolve_search_backend(retriever: Any | None) -> Any:
 def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
     search_backend = _resolve_search_backend(retriever)
 
-    def retrieval_node(state: RAGState) -> dict[str, Any]:
+    async def retrieval_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
         intent = str(state.get("intent") or "").strip()
         plan: SearchPlan = state.get("search_plan") or {}
@@ -74,11 +75,13 @@ def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
         filter_expr = str(plan.get("filter_expr") or "").strip() or None
 
         try:
-            hits = search_backend.search(
-                query=retrieval_query,
-                top_k=plan_top_k,
-                filter_expr=filter_expr,
-                mode=search_mode,
+            hits = await asyncio.to_thread(
+                lambda: search_backend.search(
+                    query=retrieval_query,
+                    top_k=plan_top_k,
+                    filter_expr=filter_expr,
+                    mode=search_mode,
+                )
             )
             docs = [_result_to_document(hit) for hit in hits]
             logger.debug(

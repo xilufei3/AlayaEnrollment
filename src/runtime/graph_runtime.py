@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from inspect import signature
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, AsyncIterator
 from uuid import uuid4
+
+from langchain_core.messages import HumanMessage
 
 from ..knowledge import SQLManager, SystemDB
 from ..knowledge.vector_manager import VectorManager
@@ -84,19 +87,19 @@ def _create_retriever(env_file: Path | str | None = None) -> VectorManager:
     return VectorManager()
 
 
-def _load_sqlite_checkpointer(db_path: Path) -> tuple[Any, Any | None]:
+async def _load_sqlite_checkpointer(db_path: Path) -> tuple[Any, Any | None]:
     try:
-        from langgraph.checkpoint.sqlite import SqliteSaver
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     except ImportError as exc:
         raise RuntimeError(
-            "Missing dependency: langgraph-checkpoint-sqlite. "
-            "Install with: pip install langgraph-checkpoint-sqlite"
+            "Missing dependency for async SQLite checkpoints. "
+            "Install with: pip install langgraph-checkpoint-sqlite aiosqlite"
         ) from exc
 
-    cm_or_saver = SqliteSaver.from_conn_string(str(db_path))
-    enter = getattr(cm_or_saver, "__enter__", None)
-    if callable(enter):
-        saver = enter()
+    cm_or_saver = AsyncSqliteSaver.from_conn_string(str(db_path))
+    aenter = getattr(cm_or_saver, "__aenter__", None)
+    if callable(aenter):
+        saver = await aenter()
         return saver, cm_or_saver
     return cm_or_saver, None
 
@@ -150,53 +153,60 @@ class AdmissionGraphRuntime:
             return AdmissionGraphRuntime._jsonable(value.model_dump())
         return str(value)
 
-    def startup(self) -> None:
+    async def startup(self) -> None:
         # 最先加载 .env，确保后续所有代码（含 Langfuse）能读到环境变量
         load_dotenv_file(self.cfg.env_file)
 
-        self.runtime_root = bootstrap_runtime_dirs(self.cfg.repo_root, runtime_name=self.cfg.runtime_name)
-        from ..graph import create_graph
+        try:
+            from ..graph.llm import reset_model_cache
+            self.runtime_root = bootstrap_runtime_dirs(self.cfg.repo_root, runtime_name=self.cfg.runtime_name)
+            from ..graph import create_graph
 
-        retriever = _create_retriever(self.cfg.env_file)
-        self._vector_store = retriever
-        checkpoint_path = self.cfg.checkpoint_path or (self.runtime_root / "checkpoints.sqlite")
-        self._checkpointer, self._checkpointer_cm = _load_sqlite_checkpointer(checkpoint_path)
-        self._thread_registry = ThreadRegistry(self.runtime_root / "thread_registry.sqlite")
+            reset_model_cache()
+            retriever = _create_retriever(self.cfg.env_file)
+            self._vector_store = retriever
+            checkpoint_path = self.cfg.checkpoint_path or (self.runtime_root / "checkpoints.sqlite")
+            self._checkpointer, self._checkpointer_cm = await _load_sqlite_checkpointer(checkpoint_path)
+            self._thread_registry = ThreadRegistry(self.runtime_root / "thread_registry.sqlite")
 
         # 检查 Langfuse 是否可用
-        _probe = _build_langfuse_handler()
-        if _probe is not None:
-            import sys
-            host = os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
-            print(f"[AlayaEnrollment] Langfuse tracing enabled. host={host}", file=sys.stderr, flush=True)
-            import logging
-            logging.getLogger(__name__).info(
-                "Langfuse tracing enabled. host=%s",
-                host,
+            _probe = _build_langfuse_handler()
+            if _probe is not None:
+                import sys
+                host = os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
+                print(f"[AlayaEnrollment] Langfuse tracing enabled. host={host}", file=sys.stderr, flush=True)
+                import logging
+                logging.getLogger(__name__).info(
+                    "Langfuse tracing enabled. host=%s",
+                    host,
+                )
+
+            self._graph = create_graph(
+                {
+                    "retriever": retriever,
+                    "vector_top_k": self.cfg.vector_top_k,
+                    "rag_max_iterations": self.cfg.rag_max_iterations,
+                },
+                checkpointer=self._checkpointer,
             )
 
-        self._graph = create_graph(
-            {
-                "retriever": retriever,
-                "vector_top_k": self.cfg.vector_top_k,
-                "rag_max_iterations": self.cfg.rag_max_iterations,
-            },
-            checkpointer=self._checkpointer,
-        )
-
         # 初始化系统数据库（会话 & 消息记录）
-        SystemDB()
+            SystemDB()
 
         # 初始化业务结构化数据管理器（registry 不存在时跳过，不影响启动）
-        try:
-            SQLManager()
-        except Exception as _sql_err:
-            import logging as _log
-            _log.getLogger(__name__).warning(
+            try:
+                SQLManager()
+            except Exception as _sql_err:
+                import logging as _log
+                _log.getLogger(__name__).warning(
                 "SQLManager 初始化跳过（table_registry 未配置或数据库不可用）：%s", _sql_err
             )
 
-    def shutdown(self) -> None:
+        except Exception:
+            await self.shutdown()
+            raise
+
+    async def shutdown(self) -> None:
         if self._vector_store is not None and hasattr(self._vector_store, "close"):
             self._vector_store.close()
         self._vector_store = None
@@ -205,9 +215,9 @@ class AdmissionGraphRuntime:
             self._thread_registry.close()
             self._thread_registry = None
         if self._checkpointer_cm is not None:
-            exit_fn = getattr(self._checkpointer_cm, "__exit__", None)
+            exit_fn = getattr(self._checkpointer_cm, "__aexit__", None)
             if callable(exit_fn):
-                exit_fn(None, None, None)
+                await exit_fn(None, None, None)
         self._checkpointer = None
         self._checkpointer_cm = None
 
@@ -333,6 +343,73 @@ class AdmissionGraphRuntime:
                         return text
         return ""
 
+    @staticmethod
+    def _message_type(message: Any) -> str:
+        if isinstance(message, dict):
+            return str(message.get("type", message.get("role", ""))).lower()
+        return str(getattr(message, "type", "")).lower()
+
+    @classmethod
+    def _messages_match(cls, left: Any, right: Any) -> bool:
+        left_id = str(getattr(left, "id", None) if not isinstance(left, dict) else left.get("id", "") or "").strip()
+        right_id = str(getattr(right, "id", None) if not isinstance(right, dict) else right.get("id", "") or "").strip()
+        if left_id and right_id:
+            return left_id == right_id
+
+        left_content = cls._jsonable(
+            getattr(left, "content", None) if not isinstance(left, dict) else left.get("content")
+        )
+        right_content = cls._jsonable(
+            getattr(right, "content", None) if not isinstance(right, dict) else right.get("content")
+        )
+        return cls._message_type(left) == cls._message_type(right) and left_content == right_content
+
+    @classmethod
+    def _select_input_messages_for_initial_state(
+        cls,
+        *,
+        existing_messages: list[Any],
+        pending_messages: list[Any],
+        query: str,
+    ) -> list[Any]:
+        if pending_messages:
+            if not existing_messages:
+                return pending_messages
+            if len(pending_messages) >= len(existing_messages):
+                prefix_matches = all(
+                    cls._messages_match(existing_messages[idx], pending_messages[idx])
+                    for idx in range(len(existing_messages))
+                )
+                if prefix_matches:
+                    return pending_messages[len(existing_messages) :]
+            return [pending_messages[-1]]
+        if query:
+            return [HumanMessage(content=query)]
+        return []
+
+    def _resolve_thread_metadata(
+        self,
+        *,
+        thread_id: str,
+        fallback: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        merged = dict(fallback or {})
+
+        thread_obj = self._threads.get(thread_id)
+        if isinstance(thread_obj, dict):
+            thread_meta = thread_obj.get("metadata", {})
+            if isinstance(thread_meta, dict):
+                merged.update(self._jsonable(thread_meta))
+
+        if self._thread_registry is not None:
+            row = self._thread_registry.get_thread(thread_id)
+            if isinstance(row, dict):
+                registry_meta = row.get("metadata", {})
+                if isinstance(registry_meta, dict):
+                    merged.update(self._jsonable(registry_meta))
+
+        return merged
+
     def get_thread_history(self, *, thread_id: str, limit: int = 10) -> list[dict[str, Any]]:
         if self._checkpointer is None:
             return []
@@ -362,7 +439,10 @@ class AdmissionGraphRuntime:
                         "checkpoint_id": checkpoint_id,
                         "checkpoint_map": None,
                     },
-                    "metadata": self._jsonable(row.metadata or {}),
+                    "metadata": self._resolve_thread_metadata(
+                        thread_id=thread_id,
+                        fallback=self._jsonable(row.metadata or {}),
+                    ),
                     "created_at": checkpoint.get("ts"),
                     "parent_checkpoint": None,
                     "tasks": [],
@@ -387,7 +467,10 @@ class AdmissionGraphRuntime:
                     "checkpoint_id": None,
                     "checkpoint_map": None,
                 },
-                "metadata": self._jsonable(thread_obj.get("metadata", {}) or {}),
+                "metadata": self._resolve_thread_metadata(
+                    thread_id=thread_id,
+                    fallback=self._jsonable(thread_obj.get("metadata", {}) or {}),
+                ),
                 "created_at": thread_obj.get("state_updated_at"),
                 "parent_checkpoint": None,
                 "tasks": [],
@@ -414,7 +497,7 @@ class AdmissionGraphRuntime:
         thread_id: str,
         input_payload: Any,
         stream_mode: str | list[str] | None,
-    ) -> tuple[str, Iterator[tuple[str, Any]]]:
+    ) -> tuple[str, AsyncIterator[tuple[str, Any]]]:
         if self._graph is None:
             raise RuntimeError("Runtime not started")
 
@@ -427,37 +510,6 @@ class AdmissionGraphRuntime:
         if isinstance(input_payload, dict) and isinstance(input_payload.get("messages"), list):
             input_messages = list(input_payload.get("messages") or [])
 
-        def _merge_for_initial_state(base: list[Any], pending: list[Any]) -> list[Any]:
-            merged = list(base)
-            seen_ids = {
-                str(m.get("id", "")).strip()
-                for m in merged
-                if isinstance(m, dict) and str(m.get("id", "")).strip()
-            }
-            for msg in pending:
-                if not isinstance(msg, dict):
-                    continue
-                mid = str(msg.get("id", "")).strip()
-                if mid and mid in seen_ids:
-                    continue
-                merged.append(msg)
-                if mid:
-                    seen_ids.add(mid)
-            return merged
-
-        initial_state: dict[str, Any] = {"query": query}
-        if input_messages:
-            existing_state = self.get_thread_state(thread_id=thread_id)
-            existing_values = existing_state.get("values", {}) if isinstance(existing_state, dict) else {}
-            existing_raw = existing_values.get("messages", []) if isinstance(existing_values, dict) else []
-            existing_json = self._jsonable(existing_raw)
-            pending_json = self._jsonable(input_messages)
-            base_messages = existing_json if isinstance(existing_json, list) else []
-            pending_messages = pending_json if isinstance(pending_json, list) else []
-            merged_messages = _merge_for_initial_state(base_messages, pending_messages)
-            if merged_messages:
-                initial_state["messages"] = merged_messages
-
         run_id = str(uuid4())
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         lf_handler = _build_langfuse_handler(
@@ -468,81 +520,100 @@ class AdmissionGraphRuntime:
             config["callbacks"] = [lf_handler]
         mode = stream_mode or "values"
 
-        def _iter() -> Iterator[tuple[str, Any]]:
+        async def _iter() -> AsyncIterator[tuple[str, Any]]:
+            existing_values = thread.get("values", {}) if isinstance(thread, dict) else {}
+            if not existing_values:
+                persisted_state = await asyncio.to_thread(self.get_thread_state, thread_id=thread_id)
+                persisted_values = persisted_state.get("values", {}) if isinstance(persisted_state, dict) else {}
+                if isinstance(persisted_values, dict) and persisted_values:
+                    existing_values = persisted_values
+                    thread["values"] = persisted_values
+
+            initial_state: dict[str, Any] = {"query": query}
+            existing_raw = existing_values.get("messages", []) if isinstance(existing_values, dict) else []
+            existing_json = self._jsonable(existing_raw)
+            pending_json = self._jsonable(input_messages)
+            base_messages = existing_json if isinstance(existing_json, list) else []
+            pending_messages = pending_json if isinstance(pending_json, list) else []
+            input_message_delta = self._select_input_messages_for_initial_state(
+                existing_messages=base_messages,
+                pending_messages=pending_messages,
+                query=query,
+            )
+            if input_message_delta:
+                initial_state["messages"] = input_message_delta
+
             latest_thread_values: dict[str, Any] | None = None
 
-            for chunk in self._graph.stream(initial_state, config=config, stream_mode=mode):
-                event_name: str
-                event_data: Any
-                if isinstance(chunk, tuple) and len(chunk) == 2:
-                    event_name = str(chunk[0])
-                    event_data = chunk[1]
-                else:
-                    event_name = str(mode if isinstance(mode, str) else "values")
-                    event_data = chunk
+            try:
+                async for chunk in self._graph.astream(initial_state, config=config, stream_mode=mode):
+                    event_name: str
+                    event_data: Any
+                    if isinstance(chunk, tuple) and len(chunk) == 2:
+                        event_name = str(chunk[0])
+                        event_data = chunk[1]
+                    else:
+                        event_name = str(mode if isinstance(mode, str) else "values")
+                        event_data = chunk
 
-                if event_name == "messages":
-                    meta = None
-                    if isinstance(event_data, (tuple, list)) and len(event_data) >= 2:
-                        maybe_meta = event_data[1]
-                        if isinstance(maybe_meta, dict):
-                            meta = maybe_meta
-                    node_name = str((meta or {}).get("langgraph_node", "")).strip()
-                    _answer_nodes = {"generate"}
-                    if node_name and node_name not in _answer_nodes:
+                    if event_name == "messages":
+                        meta = None
+                        if isinstance(event_data, (tuple, list)) and len(event_data) >= 2:
+                            maybe_meta = event_data[1]
+                            if isinstance(maybe_meta, dict):
+                                meta = maybe_meta
+                        node_name = str((meta or {}).get("langgraph_node", "")).strip()
+                        _answer_nodes = {"generate"}
+                        if node_name and node_name not in _answer_nodes:
+                            continue
+
+                    payload = self._jsonable(event_data)
+                    if event_name == "messages":
+                        yield (event_name, payload)
                         continue
 
-                payload = self._jsonable(event_data)
-                if event_name == "messages":
+                    if event_name == "values" and isinstance(payload, dict):
+                        latest_thread_values = payload
+                        # Do not expose internal pipeline state (intent/chunks/etc.) to chat UI.
+                        # Keep only fields that the SDK UI consumes for rendering/conversation flow.
+                        public_payload: dict[str, Any] = {}
+                        if isinstance(payload.get("messages"), list):
+                            public_payload["messages"] = payload.get("messages")
+                        elif isinstance(initial_state.get("messages"), list):
+                            public_payload["messages"] = initial_state.get("messages")
+                        if "__interrupt__" in payload:
+                            public_payload["__interrupt__"] = payload["__interrupt__"]
+                        if "context" in payload:
+                            public_payload["context"] = payload["context"]
+                        if "ui" in payload:
+                            public_payload["ui"] = payload["ui"]
+                        payload = public_payload
                     yield (event_name, payload)
-                    continue
-
-                if event_name == "values" and isinstance(payload, dict):
-                    latest_thread_values = payload
-                    # Do not expose internal pipeline state (intent/chunks/etc.) to chat UI.
-                    # Keep only fields that the SDK UI consumes for rendering/conversation flow.
-                    public_payload: dict[str, Any] = {}
-                    if isinstance(payload.get("messages"), list):
-                        public_payload["messages"] = payload.get("messages")
-                    elif isinstance(initial_state.get("messages"), list):
-                        public_payload["messages"] = initial_state.get("messages")
-                    if "__interrupt__" in payload:
-                        public_payload["__interrupt__"] = payload["__interrupt__"]
-                    if "context" in payload:
-                        public_payload["context"] = payload["context"]
-                    if "ui" in payload:
-                        public_payload["ui"] = payload["ui"]
-                    payload = public_payload
-                yield (event_name, payload)
-
-            if latest_thread_values is None:
-                latest_thread_values = self._jsonable(
-                    self.get_thread_state(thread_id=thread_id).get("values", {})
-                )
-            thread["values"] = latest_thread_values
-            thread["status"] = "idle"
-            thread["updated_at"] = self._now_iso()
-            thread["state_updated_at"] = thread["updated_at"]
-            if self._thread_registry is not None:
-                self._thread_registry.update_timestamp(
-                    thread_id=thread_id,
-                    updated_at=thread["updated_at"],
-                )
-            # 确保 Langfuse 把本请求的 trace 上报
-            if lf_handler is not None and hasattr(lf_handler, "flush"):
-                try:
-                    lf_handler.flush()
-                except Exception:
-                    pass
+            finally:
+                if latest_thread_values is None:
+                    latest_thread_values = self._jsonable(thread.get("values", {}) or {})
+                thread["values"] = latest_thread_values
+                thread["status"] = "idle"
+                thread["updated_at"] = self._now_iso()
+                thread["state_updated_at"] = thread["updated_at"]
+                if self._thread_registry is not None:
+                    self._thread_registry.update_timestamp(
+                        thread_id=thread_id,
+                        updated_at=thread["updated_at"],
+                    )
+                # 确保 Langfuse 把本请求的 trace 上报
+                if lf_handler is not None and hasattr(lf_handler, "flush"):
+                    try:
+                        lf_handler.flush()
+                    except Exception:
+                        pass
 
         return run_id, _iter()
 
-    def stream_stage_events(self, *, session_id: str, message: str) -> Iterator[dict[str, Any]]:
+    def stream_stage_events(self, *, session_id: str, message: str) -> AsyncIterator[dict[str, Any]]:
         if self._graph is None:
             raise RuntimeError("Runtime not started")
 
-        started: set[str] = set()
-        result_answer = ""
         config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
         lf_handler = _build_langfuse_handler(
             session_id=session_id,
@@ -551,55 +622,66 @@ class AdmissionGraphRuntime:
         if lf_handler is not None:
             config["callbacks"] = [lf_handler]
 
-        yield {
-            "event": "session.started",
-            "data": {"session_id": session_id},
-        }
+        async def _iter() -> AsyncIterator[dict[str, Any]]:
+            started: set[str] = set()
+            result_answer = ""
 
-        start_ts = time.time()
-        for update in self._graph.stream({"query": message}, config=config, stream_mode="updates"):
-            if not isinstance(update, dict):
-                continue
-            for node_name, payload in update.items():
-                if node_name not in self.STAGE_ORDER:
-                    continue
-                if node_name not in started:
-                    started.add(node_name)
-                    yield {
-                        "event": "stage.started",
-                        "data": {"stage": node_name, "session_id": session_id},
-                    }
+            yield {
+                "event": "session.started",
+                "data": {"session_id": session_id},
+            }
 
-                summary: dict[str, Any] = {"stage": node_name, "session_id": session_id}
-                if isinstance(payload, dict):
-                    if node_name == "intent_classify":
-                        summary["intent"] = payload.get("intent", "")
-                        summary["confidence"] = payload.get("confidence", 0.0)
-                    elif node_name == "agentic_rag":
-                        chunks = payload.get("chunks", []) or []
-                        summary["chunks_count"] = len(chunks)
-                        missing = payload.get("missing_slots") or []
-                        if missing:
-                            summary["missing_slots"] = missing
-                    elif node_name == "generate":
-                        answer = str(payload.get("answer", "") or "")
-                        result_answer = answer
-                        summary["answer_len"] = len(answer)
-
-                yield {"event": "stage.completed", "data": summary}
-
-        if lf_handler is not None and hasattr(lf_handler, "flush"):
+            start_ts = time.time()
+            initial_state = {
+                "query": message,
+                "messages": [HumanMessage(content=message)],
+            }
             try:
-                lf_handler.flush()
-            except Exception:
-                pass
+                async for update in self._graph.astream(initial_state, config=config, stream_mode="updates"):
+                    if not isinstance(update, dict):
+                        continue
+                    for node_name, payload in update.items():
+                        if node_name not in self.STAGE_ORDER:
+                            continue
+                        if node_name not in started:
+                            started.add(node_name)
+                            yield {
+                                "event": "stage.started",
+                                "data": {"stage": node_name, "session_id": session_id},
+                            }
 
-        yield {
-            "event": "message.completed",
-            "data": {
-                "session_id": session_id,
-                "answer": result_answer,
-                "elapsed_ms": int((time.time() - start_ts) * 1000),
-            },
-        }
-        yield {"event": "done", "data": {"session_id": session_id}}
+                        summary: dict[str, Any] = {"stage": node_name, "session_id": session_id}
+                        if isinstance(payload, dict):
+                            if node_name == "intent_classify":
+                                summary["intent"] = payload.get("intent", "")
+                                summary["confidence"] = payload.get("confidence", 0.0)
+                            elif node_name == "agentic_rag":
+                                chunks = payload.get("chunks", []) or []
+                                summary["chunks_count"] = len(chunks)
+                                missing = payload.get("missing_slots") or []
+                                if missing:
+                                    summary["missing_slots"] = missing
+                            elif node_name == "generate":
+                                answer = str(payload.get("answer", "") or "")
+                                result_answer = answer
+                                summary["answer_len"] = len(answer)
+
+                        yield {"event": "stage.completed", "data": summary}
+            finally:
+                if lf_handler is not None and hasattr(lf_handler, "flush"):
+                    try:
+                        lf_handler.flush()
+                    except Exception:
+                        pass
+
+            yield {
+                "event": "message.completed",
+                "data": {
+                    "session_id": session_id,
+                    "answer": result_answer,
+                    "elapsed_ms": int((time.time() - start_ts) * 1000),
+                },
+            }
+            yield {"event": "done", "data": {"session_id": session_id}}
+
+        return _iter()

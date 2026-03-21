@@ -81,16 +81,18 @@ def create_agentic_rag_node(
         search_planner_model_id=search_planner_model_id,
     )
 
-    def agentic_rag_node(state: Any) -> dict[str, Any]:
+    async def agentic_rag_node(state: Any) -> dict[str, Any]:
         rag_input: RAGState = {
             "query": str(state.get("query") or "").strip(),
             "intent": str(state.get("intent") or "").strip(),
             "slots": dict(state.get("slots") or {}),
+            "required_slots": list(state.get("required_slots") or []),
             "rag_iteration": 0,
             "max_iterations": max_iterations,
             "search_plan": {},
             "sql_plan": {},
             "vector_chunks": [],
+            "candidate_vector_chunks": [],
             "structured_chunks": [],
             "structured_results": [],
             "chunks": [],
@@ -100,7 +102,7 @@ def create_agentic_rag_node(
         }
 
         try:
-            final_state: RAGState = rag_graph.invoke(rag_input)
+            final_state: RAGState = await rag_graph.ainvoke(rag_input)
         except Exception as exc:
             logger.error(f"AgenticRAG sub-graph error {type(exc).__name__}: {exc}")
             return {"chunks": [], "missing_slots": [], "structured_results": []}

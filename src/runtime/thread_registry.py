@@ -122,6 +122,28 @@ class ThreadRegistry:
             out = out[offset : offset + limit]
         return out
 
+    def get_thread(self, thread_id: str) -> dict[str, Any] | None:
+        conn = self._ensure_conn()
+        row = conn.execute(
+            "SELECT thread_id, created_at, updated_at, metadata FROM threads WHERE thread_id = ?",
+            (thread_id,),
+        ).fetchone()
+        if row is None:
+            return None
+
+        tid, created_at, updated_at, meta_json = row
+        try:
+            meta = json.loads(meta_json) if meta_json else {}
+        except (TypeError, ValueError):
+            meta = {}
+
+        return {
+            "thread_id": tid,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "metadata": meta,
+        }
+
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()

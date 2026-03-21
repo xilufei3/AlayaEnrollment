@@ -3,8 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Sequence
 
-from langchain_core.documents import Document
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.runtime import Runtime
 
 from ...config.settings import HISTORY_LAST_K_TURNS
@@ -18,6 +17,12 @@ from ..prompts import (
     build_missing_slot_context_suffix,
 )
 from ..state import WorkflowState
+from ..utils import (
+    chunk_texts as shared_chunk_texts,
+    extract_query_from_state as shared_extract_query_from_state,
+    to_stream_piece as shared_to_stream_piece,
+    to_text as shared_to_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,60 +33,15 @@ class GenerationComponent:
 
     @staticmethod
     def _to_text(content: Any) -> str:
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict):
-                    if "text" in item:
-                        parts.append(str(item["text"]))
-                    elif item.get("type") == "text":
-                        parts.append(str(item.get("text", "")))
-                    else:
-                        parts.append(str(item))
-                else:
-                    parts.append(str(item))
-            return " ".join([part for part in parts if part]).strip()
-        if content is None:
-            return ""
-        return str(content).strip()
+        return shared_to_text(content)
 
     @staticmethod
     def _to_stream_piece(content: Any) -> str:
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict):
-                    if "text" in item:
-                        parts.append(str(item["text"]))
-                    elif item.get("type") == "text":
-                        parts.append(str(item.get("text", "")))
-            return "".join(parts)
-        if content is None:
-            return ""
-        return str(content)
+        return shared_to_stream_piece(content)
 
     @staticmethod
     def _chunk_texts(chunks: Sequence[Any]) -> list[str]:
-        lines: list[str] = []
-        for index, chunk in enumerate(chunks, start=1):
-            if isinstance(chunk, Document):
-                text = chunk.page_content
-            elif isinstance(chunk, dict):
-                text = str(chunk.get("page_content") or chunk.get("content") or chunk.get("text") or "")
-            else:
-                text = str(chunk)
-            text = text.strip()
-            if text:
-                lines.append(f"[{index}] {text}")
-        return lines
+        return shared_chunk_texts(chunks)
 
     @staticmethod
     def _structured_results_text(rows: Sequence[dict[str, Any]]) -> str:
@@ -120,7 +80,7 @@ class GenerationComponent:
             return "（无）"
         return "\n".join(rows[-(max_turns * 2):])
 
-    def generate_short(
+    async def generate_short(
         self,
         *,
         system_prompt: str,
@@ -131,7 +91,7 @@ class GenerationComponent:
         active_model_kind = model_id or self.model_id or "generation"
         try:
             model = get_model(active_model_kind)
-            response = model.invoke(
+            response = await model.ainvoke(
                 [
                     ("system", system_prompt),
                     ("user", user_prompt),
@@ -141,7 +101,7 @@ class GenerationComponent:
         except Exception:
             return ""
 
-    def generate(
+    async def generate(
         self,
         *,
         query: str,
@@ -180,70 +140,62 @@ class GenerationComponent:
         answer_parts: list[str] = []
         saw_stream_chunk = False
         try:
-            for chunk in model.stream(request):
+            async for chunk in model.astream(request):
                 saw_stream_chunk = True
                 piece = self._to_stream_piece(getattr(chunk, "content", chunk))
                 if piece:
                     answer_parts.append(piece)
         except Exception:
             if not saw_stream_chunk:
-                response = model.invoke(request)
+                response = await model.ainvoke(request)
                 return self._to_text(getattr(response, "content", response))
             return "".join(answer_parts)
 
         answer = "".join(answer_parts)
         if not answer:
             if not saw_stream_chunk:
-                response = model.invoke(request)
+                response = await model.ainvoke(request)
                 return self._to_text(getattr(response, "content", response))
             return ""
         return answer
 
 
 def _extract_query_from_state(state: WorkflowState) -> str:
-    query = state.get("query")
-    if query:
-        return str(query).strip()
-
-    messages = state.get("messages") or []
-    for msg in reversed(messages):
-        if isinstance(msg, BaseMessage):
-            if getattr(msg, "type", "") in ("human", "user"):
-                text = GenerationComponent._to_text(getattr(msg, "content", ""))
-                if text:
-                    return text
-        elif isinstance(msg, dict):
-            role = str(msg.get("role", msg.get("type", ""))).lower()
-            if role in ("user", "human"):
-                text = GenerationComponent._to_text(msg.get("content", ""))
-                if text:
-                    return text
-    return ""
+    return shared_extract_query_from_state(state)
 
 
-def _normalize_messages(raw_messages: Sequence[Any]) -> list[BaseMessage]:
-    normalized: list[BaseMessage] = []
-    for msg in raw_messages:
-        if isinstance(msg, BaseMessage):
-            normalized.append(msg)
-            continue
-        if not isinstance(msg, dict):
-            continue
-        role = str(msg.get("role", msg.get("type", ""))).lower()
-        content = GenerationComponent._to_text(msg.get("content", ""))
-        if not content:
-            continue
-        if role in ("user", "human"):
-            normalized.append(HumanMessage(content=content))
-        elif role in ("assistant", "ai"):
-            normalized.append(AIMessage(content=content))
-    return normalized
+def _is_current_query_message(message: Any, query: str) -> bool:
+    if not query:
+        return False
+    if isinstance(message, BaseMessage):
+        msg_type = str(getattr(message, "type", "")).lower()
+        if msg_type not in ("human", "user"):
+            return False
+        return shared_to_text(getattr(message, "content", "")) == query
+    if isinstance(message, dict):
+        msg_type = str(message.get("type", message.get("role", ""))).lower()
+        if msg_type not in ("human", "user"):
+            return False
+        return shared_to_text(message.get("content", "")) == query
+    return False
+
+
+def _messages_for_history(
+    raw_messages: Sequence[Any],
+    *,
+    query: str,
+    max_turns: int,
+) -> list[Any]:
+    messages = list(raw_messages)
+    if messages and _is_current_query_message(messages[-1], query):
+        messages = messages[:-1]
+    return messages[-(max_turns * 2) :] if messages else []
 
 
 def create_generation_node(*, model_id: str | None = None):
     component = GenerationComponent(model_id=model_id)
 
-    def generation_node(state: WorkflowState, runtime: Runtime[Any]):
+    async def generation_node(state: WorkflowState, runtime: Runtime[Any]):
         try:
             query = _extract_query_from_state(state)
             intent = str(state.get("intent") or "").strip()
@@ -258,9 +210,12 @@ def create_generation_node(*, model_id: str | None = None):
                 if chunks_for_missing:
                     # 有检索结果：先展示示例，再引导用户补充缺少的槽位
                     suffix = build_missing_slot_context_suffix(slot_names)
-                    max_msgs = HISTORY_LAST_K_TURNS * 2
-                    messages_for_history = list(messages_full)[-max_msgs:] if messages_full else []
-                    answer = component.generate(
+                    messages_for_history = _messages_for_history(
+                        messages_full,
+                        query=query,
+                        max_turns=HISTORY_LAST_K_TURNS,
+                    )
+                    answer = await component.generate(
                         query=query,
                         intent=intent,
                         chunks=chunks_for_missing,
@@ -277,49 +232,42 @@ def create_generation_node(*, model_id: str | None = None):
                         f"当前缺少的信息：{slot_names}\n"
                         "请输出一句追问："
                     )
-                    answer = component.generate_short(
+                    answer = await component.generate_short(
                         system_prompt=MISSING_SLOT_SHORT_FOLLOWUP_SYSTEM_PROMPT,
                         user_prompt=user,
                         model_id=runtime_model_id,
                     )
                     if not answer:
                         answer = f"要给你更准确的答案，我还需要知道你的{slot_names}。"
-                history = _normalize_messages(messages_full)
-                last = history[-1] if history else None
-                if query and not (
-                    isinstance(last, HumanMessage)
-                    and str(getattr(last, "content", "")).strip() == query
-                ):
-                    history.append(HumanMessage(content=query))
-                history.append(AIMessage(content=answer))
-                return {"answer": answer, "messages": history}
+                result: dict[str, Any] = {"answer": answer}
+                if answer:
+                    result["messages"] = [AIMessage(content=answer)]
+                return result
 
             # 超出招生范围：由大模型生成一句礼貌说明并引导
             if intent == "out_of_scope":
                 user = f"用户问题：{query}\n请输出一句回复："
-                answer = component.generate_short(
+                answer = await component.generate_short(
                     system_prompt=OUT_OF_SCOPE_SYSTEM_PROMPT,
                     user_prompt=user,
                     model_id=runtime_model_id,
                 )
                 if not answer:
                     answer = OUT_OF_SCOPE_FALLBACK_ANSWER
-                history = _normalize_messages(messages_full)
-                last = history[-1] if history else None
-                if query and not (
-                    isinstance(last, HumanMessage)
-                    and str(getattr(last, "content", "")).strip() == query
-                ):
-                    history.append(HumanMessage(content=query))
-                history.append(AIMessage(content=answer))
-                return {"answer": answer, "messages": history, "retrieval_skipped": True}
+                result = {"answer": answer, "retrieval_skipped": True}
+                if answer:
+                    result["messages"] = [AIMessage(content=answer)]
+                return result
 
             chunks = state.get("chunks") or []
             # 拼对话历史时只取最近 k 轮，由 config 控制
-            max_msgs = HISTORY_LAST_K_TURNS * 2
-            messages_for_history = list(messages_full)[-max_msgs:] if messages_full else []
+            messages_for_history = _messages_for_history(
+                messages_full,
+                query=query,
+                max_turns=HISTORY_LAST_K_TURNS,
+            )
 
-            answer = component.generate(
+            answer = await component.generate(
                 query=query,
                 intent=intent,
                 chunks=chunks,
@@ -335,16 +283,10 @@ def create_generation_node(*, model_id: str | None = None):
                 f"answer_len={len(answer)}"
             )
 
-            history = _normalize_messages(messages_full)
-            last = history[-1] if history else None
-            if query and not (
-                isinstance(last, HumanMessage)
-                and str(getattr(last, "content", "")).strip() == query
-            ):
-                history.append(HumanMessage(content=query))
+            result = {"answer": answer}
             if answer:
-                history.append(AIMessage(content=answer))
-            return {"answer": answer, "messages": history}
+                result["messages"] = [AIMessage(content=answer)]
+            return result
         except Exception as exc:
             logger.error(f"Generation error {type(exc).__name__}: {exc}")
             return {"answer": ""}
