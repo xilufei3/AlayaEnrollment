@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from dataclasses import dataclass, field
+from contextlib import nullcontext
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from inspect import signature
 from pathlib import Path
@@ -18,6 +19,91 @@ from ..graph.node.runtime_resources import bootstrap_runtime_dirs, load_dotenv_f
 from .thread_registry import ThreadRegistry
 
 
+@dataclass(slots=True, frozen=True)
+class _LangfuseSettings:
+    public_key: str
+    secret_key: str
+    host: str
+
+
+def _read_env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
+def _langfuse_enabled() -> bool:
+    return _read_env_bool("LANGFUSE_ENABLED", False)
+
+
+def _get_langfuse_settings() -> _LangfuseSettings | None:
+    if not _langfuse_enabled():
+        return None
+
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+    host = (
+        os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
+    ).strip().rstrip("/")
+
+    if not public_key or not secret_key or public_key.endswith("-"):
+        return None
+
+    return _LangfuseSettings(
+        public_key=public_key,
+        secret_key=secret_key,
+        host=host,
+    )
+
+
+def get_client(*, public_key: str | None = None) -> Any:
+    from langfuse import get_client as langfuse_get_client
+
+    return langfuse_get_client(public_key=public_key)
+
+
+def _build_langfuse_client() -> Any | None:
+    settings = _get_langfuse_settings()
+    if settings is None:
+        return None
+
+    try:
+        from langfuse import Langfuse
+
+        return Langfuse(
+            public_key=settings.public_key,
+            secret_key=settings.secret_key,
+            host=settings.host,
+        )
+    except Exception:
+        return None
+
+
+def _flush_langfuse_client(public_key: str | None = None) -> None:
+    settings = _get_langfuse_settings()
+    resolved_public_key = public_key or (settings.public_key if settings is not None else None)
+    if not resolved_public_key:
+        return
+
+    try:
+        get_client(public_key=resolved_public_key).flush()
+    except Exception:
+        return
+
+
+def _shutdown_langfuse_client(public_key: str | None = None) -> None:
+    settings = _get_langfuse_settings()
+    resolved_public_key = public_key or (settings.public_key if settings is not None else None)
+    if not resolved_public_key:
+        return
+
+    try:
+        get_client(public_key=resolved_public_key).shutdown()
+    except Exception:
+        return
+
+
 def _build_langfuse_handler(
     *,
     session_id: str | None = None,
@@ -28,12 +114,8 @@ def _build_langfuse_handler(
     按需构建 Langfuse CallbackHandler。
     若未安装 langfuse 包或未配置 LANGFUSE_PUBLIC_KEY，静默返回 None。
     """
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
-    host = (
-        os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
-    ).strip().rstrip("/")
-    if not public_key or not secret_key or public_key.endswith("-"):
+    settings = _get_langfuse_settings()
+    if settings is None:
         return None
     try:
         from langfuse.langchain import CallbackHandler
@@ -43,20 +125,14 @@ def _build_langfuse_handler(
         # langfuse v3 的 CallbackHandler 不再接收 secret_key/host，需先初始化 client。
         if "secret_key" not in accepted and "host" not in accepted:
             try:
-                from langfuse import Langfuse
-
-                Langfuse(
-                    public_key=public_key,
-                    secret_key=secret_key,
-                    host=host,
-                )
+                _build_langfuse_client()
             except Exception:
                 pass
 
         candidate_kwargs: dict[str, Any] = {
-            "public_key": public_key,
-            "secret_key": secret_key,
-            "host": host,
+            "public_key": settings.public_key,
+            "secret_key": settings.secret_key,
+            "host": settings.host,
             "session_id": session_id,
             "user_id": user_id,
             "metadata": metadata,
@@ -69,6 +145,45 @@ def _build_langfuse_handler(
         return CallbackHandler(**kwargs)
     except Exception:
         return None
+
+
+def _build_langfuse_propagation_context(
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    tags: list[str] | None = None,
+    trace_name: str | None = None,
+) -> Any:
+    settings = _get_langfuse_settings()
+    if settings is None:
+        return nullcontext()
+
+    sanitized_metadata: dict[str, str] = {}
+    for key, value in (metadata or {}).items():
+        if value is None:
+            continue
+        sanitized_metadata[str(key)] = str(value)
+
+    normalized_tags = [str(tag) for tag in (tags or []) if str(tag).strip()]
+
+    try:
+        import langfuse
+
+        kwargs: dict[str, Any] = {}
+        if session_id is not None:
+            kwargs["session_id"] = session_id
+        if user_id is not None:
+            kwargs["user_id"] = user_id
+        if sanitized_metadata:
+            kwargs["metadata"] = sanitized_metadata
+        if normalized_tags:
+            kwargs["tags"] = normalized_tags
+        if trace_name is not None:
+            kwargs["trace_name"] = trace_name
+        return langfuse.propagate_attributes(**kwargs)
+    except Exception:
+        return nullcontext()
 
 
 @dataclass(slots=True)
@@ -120,6 +235,7 @@ class AdmissionGraphRuntime:
         self._graph: Any | None = None
         self.runtime_root: Path | None = None
         self._threads: dict[str, dict[str, Any]] = {}
+        self._langfuse_public_key: str | None = None
 
     @staticmethod
     def _now_iso() -> str:
@@ -156,6 +272,7 @@ class AdmissionGraphRuntime:
     async def startup(self) -> None:
         # 最先加载 .env，确保后续所有代码（含 Langfuse）能读到环境变量
         load_dotenv_file(self.cfg.env_file)
+        self._langfuse_public_key = None
 
         try:
             from ..graph.llm import reset_model_cache
@@ -169,16 +286,21 @@ class AdmissionGraphRuntime:
             self._checkpointer, self._checkpointer_cm = await _load_sqlite_checkpointer(checkpoint_path)
             self._thread_registry = ThreadRegistry(self.runtime_root / "thread_registry.sqlite")
 
-        # 检查 Langfuse 是否可用
-            _probe = _build_langfuse_handler()
-            if _probe is not None:
+            # 检查 Langfuse 是否可用
+            langfuse_settings = _get_langfuse_settings()
+            langfuse_client = _build_langfuse_client()
+            if langfuse_settings is not None and langfuse_client is not None:
+                self._langfuse_public_key = langfuse_settings.public_key
                 import sys
-                host = os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
-                print(f"[AlayaEnrollment] Langfuse tracing enabled. host={host}", file=sys.stderr, flush=True)
+                print(
+                    f"[AlayaEnrollment] Langfuse tracing enabled. host={langfuse_settings.host}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 import logging
                 logging.getLogger(__name__).info(
                     "Langfuse tracing enabled. host=%s",
-                    host,
+                    langfuse_settings.host,
                 )
 
             self._graph = create_graph(
@@ -220,6 +342,8 @@ class AdmissionGraphRuntime:
                 await exit_fn(None, None, None)
         self._checkpointer = None
         self._checkpointer_cm = None
+        _shutdown_langfuse_client(self._langfuse_public_key)
+        self._langfuse_public_key = None
 
     def create_thread(self, *, thread_id: str | None = None, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         tid = thread_id or str(uuid4())
@@ -512,10 +636,19 @@ class AdmissionGraphRuntime:
 
         run_id = str(uuid4())
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
-        lf_handler = _build_langfuse_handler(
-            session_id=thread_id,
-            metadata={"run_id": run_id, "source": "langgraph_sdk"},
-        )
+        lf_handler = None
+        lf_trace_context = nullcontext()
+        if _langfuse_enabled():
+            lf_handler = _build_langfuse_handler(
+                session_id=thread_id,
+                metadata={"thread_id": thread_id, "run_id": run_id, "source": "langgraph_sdk"},
+            )
+            lf_trace_context = _build_langfuse_propagation_context(
+                session_id=thread_id,
+                metadata={"thread_id": thread_id, "run_id": run_id, "source": "langgraph_sdk"},
+                tags=["langgraph_sdk"],
+                trace_name=f"langgraph-sdk:{thread_id}",
+            )
         if lf_handler is not None:
             config["callbacks"] = [lf_handler]
         mode = stream_mode or "values"
@@ -546,49 +679,50 @@ class AdmissionGraphRuntime:
             latest_thread_values: dict[str, Any] | None = None
 
             try:
-                async for chunk in self._graph.astream(initial_state, config=config, stream_mode=mode):
-                    event_name: str
-                    event_data: Any
-                    if isinstance(chunk, tuple) and len(chunk) == 2:
-                        event_name = str(chunk[0])
-                        event_data = chunk[1]
-                    else:
-                        event_name = str(mode if isinstance(mode, str) else "values")
-                        event_data = chunk
+                with lf_trace_context:
+                    async for chunk in self._graph.astream(initial_state, config=config, stream_mode=mode):
+                        event_name: str
+                        event_data: Any
+                        if isinstance(chunk, tuple) and len(chunk) == 2:
+                            event_name = str(chunk[0])
+                            event_data = chunk[1]
+                        else:
+                            event_name = str(mode if isinstance(mode, str) else "values")
+                            event_data = chunk
 
-                    if event_name == "messages":
-                        meta = None
-                        if isinstance(event_data, (tuple, list)) and len(event_data) >= 2:
-                            maybe_meta = event_data[1]
-                            if isinstance(maybe_meta, dict):
-                                meta = maybe_meta
-                        node_name = str((meta or {}).get("langgraph_node", "")).strip()
-                        _answer_nodes = {"generate"}
-                        if node_name and node_name not in _answer_nodes:
+                        if event_name == "messages":
+                            meta = None
+                            if isinstance(event_data, (tuple, list)) and len(event_data) >= 2:
+                                maybe_meta = event_data[1]
+                                if isinstance(maybe_meta, dict):
+                                    meta = maybe_meta
+                            node_name = str((meta or {}).get("langgraph_node", "")).strip()
+                            _answer_nodes = {"generate"}
+                            if node_name and node_name not in _answer_nodes:
+                                continue
+
+                        payload = self._jsonable(event_data)
+                        if event_name == "messages":
+                            yield (event_name, payload)
                             continue
 
-                    payload = self._jsonable(event_data)
-                    if event_name == "messages":
+                        if event_name == "values" and isinstance(payload, dict):
+                            latest_thread_values = payload
+                            # Do not expose internal pipeline state (intent/chunks/etc.) to chat UI.
+                            # Keep only fields that the SDK UI consumes for rendering/conversation flow.
+                            public_payload: dict[str, Any] = {}
+                            if isinstance(payload.get("messages"), list):
+                                public_payload["messages"] = payload.get("messages")
+                            elif isinstance(initial_state.get("messages"), list):
+                                public_payload["messages"] = initial_state.get("messages")
+                            if "__interrupt__" in payload:
+                                public_payload["__interrupt__"] = payload["__interrupt__"]
+                            if "context" in payload:
+                                public_payload["context"] = payload["context"]
+                            if "ui" in payload:
+                                public_payload["ui"] = payload["ui"]
+                            payload = public_payload
                         yield (event_name, payload)
-                        continue
-
-                    if event_name == "values" and isinstance(payload, dict):
-                        latest_thread_values = payload
-                        # Do not expose internal pipeline state (intent/chunks/etc.) to chat UI.
-                        # Keep only fields that the SDK UI consumes for rendering/conversation flow.
-                        public_payload: dict[str, Any] = {}
-                        if isinstance(payload.get("messages"), list):
-                            public_payload["messages"] = payload.get("messages")
-                        elif isinstance(initial_state.get("messages"), list):
-                            public_payload["messages"] = initial_state.get("messages")
-                        if "__interrupt__" in payload:
-                            public_payload["__interrupt__"] = payload["__interrupt__"]
-                        if "context" in payload:
-                            public_payload["context"] = payload["context"]
-                        if "ui" in payload:
-                            public_payload["ui"] = payload["ui"]
-                        payload = public_payload
-                    yield (event_name, payload)
             finally:
                 if latest_thread_values is None:
                     latest_thread_values = self._jsonable(thread.get("values", {}) or {})
@@ -602,11 +736,8 @@ class AdmissionGraphRuntime:
                         updated_at=thread["updated_at"],
                     )
                 # 确保 Langfuse 把本请求的 trace 上报
-                if lf_handler is not None and hasattr(lf_handler, "flush"):
-                    try:
-                        lf_handler.flush()
-                    except Exception:
-                        pass
+                if lf_handler is not None:
+                    _flush_langfuse_client(self._langfuse_public_key)
 
         return run_id, _iter()
 
@@ -615,10 +746,19 @@ class AdmissionGraphRuntime:
             raise RuntimeError("Runtime not started")
 
         config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
-        lf_handler = _build_langfuse_handler(
-            session_id=session_id,
-            metadata={"source": "chat_stream"},
-        )
+        lf_handler = None
+        lf_trace_context = nullcontext()
+        if _langfuse_enabled():
+            lf_handler = _build_langfuse_handler(
+                session_id=session_id,
+                metadata={"session_id": session_id, "source": "chat_stream"},
+            )
+            lf_trace_context = _build_langfuse_propagation_context(
+                session_id=session_id,
+                metadata={"session_id": session_id, "source": "chat_stream"},
+                tags=["chat_stream"],
+                trace_name=f"chat-stream:{session_id}",
+            )
         if lf_handler is not None:
             config["callbacks"] = [lf_handler]
 
@@ -637,42 +777,40 @@ class AdmissionGraphRuntime:
                 "messages": [HumanMessage(content=message)],
             }
             try:
-                async for update in self._graph.astream(initial_state, config=config, stream_mode="updates"):
-                    if not isinstance(update, dict):
-                        continue
-                    for node_name, payload in update.items():
-                        if node_name not in self.STAGE_ORDER:
+                with lf_trace_context:
+                    async for update in self._graph.astream(initial_state, config=config, stream_mode="updates"):
+                        if not isinstance(update, dict):
                             continue
-                        if node_name not in started:
-                            started.add(node_name)
-                            yield {
-                                "event": "stage.started",
-                                "data": {"stage": node_name, "session_id": session_id},
-                            }
+                        for node_name, payload in update.items():
+                            if node_name not in self.STAGE_ORDER:
+                                continue
+                            if node_name not in started:
+                                started.add(node_name)
+                                yield {
+                                    "event": "stage.started",
+                                    "data": {"stage": node_name, "session_id": session_id},
+                                }
 
-                        summary: dict[str, Any] = {"stage": node_name, "session_id": session_id}
-                        if isinstance(payload, dict):
-                            if node_name == "intent_classify":
-                                summary["intent"] = payload.get("intent", "")
-                                summary["confidence"] = payload.get("confidence", 0.0)
-                            elif node_name == "agentic_rag":
-                                chunks = payload.get("chunks", []) or []
-                                summary["chunks_count"] = len(chunks)
-                                missing = payload.get("missing_slots") or []
-                                if missing:
-                                    summary["missing_slots"] = missing
-                            elif node_name == "generate":
-                                answer = str(payload.get("answer", "") or "")
-                                result_answer = answer
-                                summary["answer_len"] = len(answer)
+                            summary: dict[str, Any] = {"stage": node_name, "session_id": session_id}
+                            if isinstance(payload, dict):
+                                if node_name == "intent_classify":
+                                    summary["intent"] = payload.get("intent", "")
+                                    summary["confidence"] = payload.get("confidence", 0.0)
+                                elif node_name == "agentic_rag":
+                                    chunks = payload.get("chunks", []) or []
+                                    summary["chunks_count"] = len(chunks)
+                                    missing = payload.get("missing_slots") or []
+                                    if missing:
+                                        summary["missing_slots"] = missing
+                                elif node_name == "generate":
+                                    answer = str(payload.get("answer", "") or "")
+                                    result_answer = answer
+                                    summary["answer_len"] = len(answer)
 
-                        yield {"event": "stage.completed", "data": summary}
+                            yield {"event": "stage.completed", "data": summary}
             finally:
-                if lf_handler is not None and hasattr(lf_handler, "flush"):
-                    try:
-                        lf_handler.flush()
-                    except Exception:
-                        pass
+                if lf_handler is not None:
+                    _flush_langfuse_client(self._langfuse_public_key)
 
             yield {
                 "event": "message.completed",

@@ -227,6 +227,12 @@ python -m script.demo_vector_search --query "本科专业" --top-k 3
 - 公网入口的基础 IP 限流由 Nginx `limit_req` 实现，默认只对上述三个流式路径生效，超限返回 `429`。
 - 当前 single-flight 为进程内实现，适用于单机单 worker；后续如果部署多个 worker，需要改成 Redis 或网关层的共享租约/配额模型。
 
+## Langfuse
+
+- 只有在 `LANGFUSE_ENABLED=true` 时，后端才会初始化 Langfuse 并上报追踪数据。
+- 即使配置了 `LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`、`LANGFUSE_HOST`，只要 `LANGFUSE_ENABLED` 未开启或为 `false`，就不会上报。
+- 当前运行时会在请求结束时显式调用 Langfuse client 的 `flush()`，并在服务关闭时调用 `shutdown()`，避免对话 trace 长时间留在本地队列里不出现在 Langfuse UI。
+
 ## 推荐顺序
 
 ```bash
