@@ -172,14 +172,14 @@ function ScrollToBottom(props: { className?: string; style?: CSSProperties }) {
 
 function LandingHero(props: { onPromptSelect: (question: string) => void }) {
   return (
-    <div className="space-y-5 pb-4">
+    <div className="space-y-[1.125rem] pb-3">
       <div className="flex items-center justify-between gap-4 px-1">
         <p className="text-sm font-semibold tracking-[0.18em] text-foreground/88">
           热门问题
         </p>
       </div>
 
-      <div className="grid items-stretch gap-3 sm:grid-cols-2 sm:auto-rows-fr lg:grid-cols-3 lg:grid-rows-2">
+      <div className="grid items-stretch gap-[0.7rem] sm:grid-cols-2 sm:auto-rows-fr sm:gap-3 lg:grid-cols-3 lg:grid-rows-2">
         {QUICK_PROMPTS.map((prompt, index) => {
           const theme = PROMPT_THEMES[index % PROMPT_THEMES.length];
           const Icon = theme.icon;
@@ -196,14 +196,14 @@ function LandingHero(props: { onPromptSelect: (question: string) => void }) {
                 boxShadow: theme.shadow,
               }}
               onClick={() => props.onPromptSelect(prompt.question)}
-              className="group relative h-full overflow-hidden rounded-[1.35rem] border p-4 text-left transition-all duration-300 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#1D9E75]/15"
+              className="group relative h-full overflow-hidden rounded-[1.25rem] border p-[0.9rem] text-left transition-all duration-300 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#1D9E75]/15 sm:p-4"
               style={{
                 background: theme.background,
                 borderColor: theme.borderColor,
                 boxShadow: "0 10px 24px rgba(24, 72, 71, 0.07)",
               }}
             >
-              <span className="absolute bottom-4 left-0 top-4 flex w-1 items-center">
+              <span className="absolute bottom-3.5 left-0 top-3.5 flex w-1 items-center">
                 <span
                   className="h-full w-full origin-center rounded-r-full scale-y-[0.42] transition-transform duration-300 group-hover:scale-y-100"
                   style={{ background: theme.accent }}
@@ -212,23 +212,23 @@ function LandingHero(props: { onPromptSelect: (question: string) => void }) {
               <div className="relative flex h-full flex-col">
                 <div className="flex items-start justify-between gap-3">
                   <div
-                    className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[0.12em]"
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-[0.3125rem] text-[10.5px] font-semibold tracking-[0.12em]"
                     style={{
                       background: theme.chipBackground,
                       color: theme.chipColor,
                     }}
                   >
-                    <Icon className="size-3.5" />
+                    <Icon className="size-[0.82rem]" />
                     {prompt.label}
                   </div>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-[10.5px] text-muted-foreground">
                     热门咨询
                   </span>
                 </div>
 
-                <div className="mt-4 flex flex-1 flex-col">
+                <div className="mt-3.5 flex flex-1 flex-col">
                   <p
-                    className="text-[15px] font-medium leading-7 text-foreground sm:text-base"
+                    className="text-[14.5px] font-medium leading-[1.65rem] text-foreground sm:text-[15.5px]"
                     style={{
                       display: "-webkit-box",
                       overflow: "hidden",
@@ -239,7 +239,7 @@ function LandingHero(props: { onPromptSelect: (question: string) => void }) {
                     {prompt.question}
                   </p>
                   <p
-                    className="mt-2 text-[13px] leading-6"
+                    className="mt-2 text-[12.75px] leading-[1.4rem]"
                     style={{
                       color: theme.hintColor,
                       display: "-webkit-box",
@@ -252,9 +252,9 @@ function LandingHero(props: { onPromptSelect: (question: string) => void }) {
                   </p>
                 </div>
 
-                <div className="mt-auto flex items-center justify-end gap-3 pt-4">
+                <div className="mt-auto flex items-center justify-end gap-3 pt-3.5">
                   <div
-                    className="flex items-center gap-1.5 text-[13px] font-semibold"
+                    className="flex items-center gap-1.5 text-[12.75px] font-semibold"
                     style={{ color: theme.accent }}
                   >
                     立即提问
@@ -282,7 +282,7 @@ export function Thread() {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
-  const [composerHeight, setComposerHeight] = useState(260);
+  const [composerHeight, setComposerHeight] = useState(236);
 
   const stream = useStreamContext();
   const messages = stream.messages;
@@ -396,8 +396,8 @@ export function Thread() {
   const contentCenterOffset =
     isLargeScreen && chatHistoryOpen ? HISTORY_PANEL_WIDTH / 2 : 0;
   const reservedComposerSpace = Math.max(
-    composerHeight + 28,
-    chatStarted ? 220 : 310,
+    composerHeight + (chatStarted ? 24 : 16),
+    chatStarted ? 220 : 240,
   );
 
   useEffect(() => {
@@ -477,20 +477,23 @@ export function Thread() {
           className={cn(
             "relative z-10",
             chatStarted
-              ? "px-[4.5rem] pb-2 pt-4 sm:px-[5.5rem] sm:pb-2 lg:px-8"
-              : "px-4 pb-3 pt-4 sm:px-6 lg:px-8",
+              ? "px-[4.25rem] pb-2 pt-3.5 sm:px-[5.1rem] sm:pb-2 lg:px-8"
+              : "px-4 pb-2.5 pt-3.5 sm:px-6 lg:px-8",
           )}
         />
 
         <StickToBottom className="relative flex-1 overflow-hidden">
           <StickyToBottomContent
             className={cn(
-              "absolute inset-0 overflow-y-scroll px-4 sm:px-6 lg:px-8",
+              "absolute inset-0 px-4 sm:px-6 lg:px-8",
+              chatStarted || !isLargeScreen ? "overflow-y-scroll" : "overflow-y-hidden",
               "[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/20 [&::-webkit-scrollbar-track]:bg-transparent",
             )}
             contentClassName={cn(
-              "mx-auto flex w-full flex-col gap-5",
-              chatStarted ? "max-w-4xl pt-3" : "max-w-4xl pt-4",
+              "mx-auto flex w-full flex-col gap-[1.125rem]",
+              chatStarted
+                ? "max-w-[50.4rem] pt-3"
+                : "max-w-[50.4rem] pt-2.5",
             )}
             contentStyle={{ paddingBottom: reservedComposerSpace }}
             content={
@@ -562,12 +565,12 @@ export function Thread() {
           transition={historyPanelTransition}
         >
           <div className="bg-gradient-to-t from-[#f7f2e8] via-[#faf7f0]/96 to-transparent px-4 pb-4 pt-6 sm:px-6 lg:px-8">
-            <div className="relative mx-auto w-full max-w-4xl">
+            <div className="relative mx-auto w-full max-w-[50.4rem]">
               <div ref={composerDockRef} className="pointer-events-auto">
                 {!chatStarted && (
-                  <div className="mb-4 flex items-center gap-4 px-2">
+                  <div className="mb-3.5 flex items-center gap-3.5 px-2">
                     <div className="h-px flex-1 bg-gradient-to-r from-transparent via-[#1D9E75]/28 to-[#1D9E75]/6" />
-                    <span className="text-sm font-medium text-muted-foreground">
+                    <span className="text-[13.5px] font-medium text-muted-foreground">
                       或直接输入你的问题
                     </span>
                     <div className="h-px flex-1 bg-gradient-to-l from-transparent via-[#1D9E75]/28 to-[#1D9E75]/6" />
@@ -575,7 +578,7 @@ export function Thread() {
                 )}
 
                 <div
-                  className="surface-glass relative overflow-hidden rounded-[2rem] border transition-all duration-300"
+                  className="surface-glass relative overflow-hidden rounded-[1.8rem] border transition-all duration-300"
                   style={{
                     borderColor: composerFocused
                       ? "rgba(29, 158, 117, 0.36)"
@@ -585,10 +588,10 @@ export function Thread() {
                       : "0 24px 60px rgba(24, 72, 71, 0.12)",
                   }}
                 >
-                  <div className="pointer-events-none absolute -right-10 top-0 h-28 w-28 rounded-full bg-[radial-gradient(circle,rgba(29,158,117,0.15),transparent_72%)]" />
+                  <div className="pointer-events-none absolute -right-10 top-0 h-[6.25rem] w-[6.25rem] rounded-full bg-[radial-gradient(circle,rgba(29,158,117,0.15),transparent_72%)]" />
                   <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#C9A35D]/75 to-transparent" />
                   <form onSubmit={handleSubmit} className="grid">
-                    <div className="px-5 pt-5 sm:px-6 sm:pt-6">
+                    <div className="px-[1.125rem] pt-[1.125rem] sm:px-5 sm:pt-5">
                       <textarea
                         ref={textareaRef}
                         value={input}
@@ -609,14 +612,14 @@ export function Thread() {
                           }
                         }}
                         placeholder={BRAND_COPY.composerPlaceholder}
-                        className="min-h-[112px] w-full resize-none bg-transparent text-[15px] leading-7 text-foreground shadow-none outline-none placeholder:text-[15px] placeholder:text-muted-foreground/85 focus:outline-none"
+                        className="min-h-[100px] w-full resize-none bg-transparent text-[14.5px] leading-[1.65rem] text-foreground shadow-none outline-none placeholder:text-[14.5px] placeholder:text-muted-foreground/85 focus:outline-none"
                       />
                     </div>
 
-                    <div className="flex flex-col gap-4 border-t border-[#1D9E75]/10 px-5 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-6">
-                      <div className="space-y-2">
-                        <div className="flex items-start gap-2 text-sm leading-6 text-muted-foreground">
-                          <ShieldCheck className="mt-1 size-4 shrink-0 text-[#C9A35D]" />
+                    <div className="flex flex-col gap-3.5 border-t border-[#1D9E75]/10 px-[1.125rem] py-[0.875rem] sm:flex-row sm:items-end sm:justify-between sm:px-5">
+                      <div className="space-y-1.5">
+                        <div className="flex items-start gap-2 text-[13px] leading-[1.35rem] text-muted-foreground">
+                          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-[#C9A35D]" />
                           <p>{BRAND_COPY.disclaimer}</p>
                         </div>
                       </div>
@@ -626,7 +629,7 @@ export function Thread() {
                           <Button
                             key="stop"
                             variant="outline"
-                            className="h-11 rounded-full border-[#1D9E75]/18 bg-white/80 px-5 text-foreground shadow-[0_12px_24px_rgba(24,72,71,0.08)]"
+                            className="h-10 rounded-full border-[#1D9E75]/18 bg-white/80 px-[1.375rem] text-foreground shadow-[0_12px_24px_rgba(24,72,71,0.08)]"
                             onClick={() => stream.stop()}
                           >
                             <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -636,7 +639,7 @@ export function Thread() {
                           <Button
                             type="submit"
                             variant="brand"
-                            className="h-11 rounded-full px-6"
+                            className="h-10 rounded-full px-[1.375rem]"
                             disabled={isLoading || !input.trim()}
                           >
                             <SendHorizontal className="size-4" />

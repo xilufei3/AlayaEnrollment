@@ -32,22 +32,22 @@ export function ThreadHeader({
             transition={HEADER_TRANSITION}
             className="overflow-hidden"
           >
-            <div className="mx-auto w-full max-w-4xl">
-              <div className="surface-glass relative overflow-hidden rounded-[2rem] border border-white/75 px-5 py-4 shadow-[0_24px_56px_rgba(24,72,71,0.1)] sm:px-6 sm:py-[18px]">
-                <div className="pointer-events-none absolute -right-12 top-0 h-36 w-36 rounded-full bg-[radial-gradient(circle,rgba(29,158,117,0.16),transparent_68%)]" />
-                <div className="pointer-events-none absolute bottom-0 left-10 h-24 w-24 rounded-full bg-[radial-gradient(circle,rgba(211,154,44,0.12),transparent_72%)]" />
+            <div className="mx-auto w-full max-w-[50.4rem]">
+              <div className="surface-glass relative overflow-hidden rounded-[1.8rem] border border-white/75 px-[1.125rem] py-[0.95rem] shadow-[0_22px_50px_rgba(24,72,71,0.1)] sm:px-[1.35rem] sm:py-4">
+                <div className="pointer-events-none absolute -right-12 top-0 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(29,158,117,0.16),transparent_68%)]" />
+                <div className="pointer-events-none absolute bottom-0 left-8 h-[5.5rem] w-[5.5rem] rounded-full bg-[radial-gradient(circle,rgba(211,154,44,0.12),transparent_72%)]" />
 
-                <div className="relative mx-auto w-full max-w-xl text-center">
-                  <div className="space-y-2.5">
+                <div className="relative mx-auto w-full max-w-[34rem] text-center">
+                  <div className="space-y-[0.6rem]">
                     <div className="inline-flex flex-row items-center justify-center gap-1.5">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center">
-                        <SustechMark className="h-16 w-16" />
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center">
+                        <SustechMark className="h-[3.75rem] w-[3.75rem]" />
                       </div>
-                      <div className="inline-flex items-center rounded-full border border-[#1D9E75]/12 bg-[#1D9E75]/8 px-3 py-1 text-[11px] font-semibold tracking-[0.18em] text-[#1D9E75]">
+                      <div className="inline-flex items-center rounded-full border border-[#1D9E75]/12 bg-[#1D9E75]/8 px-3 py-1 text-[10px] font-semibold tracking-[0.18em] text-[#1D9E75]">
                         SUSTech Admissions
                       </div>
                     </div>
-                    <h2 className="text-center font-serif text-[1.7rem] font-semibold leading-tight text-foreground sm:text-[2rem]">
+                    <h2 className="text-center font-serif text-[1.55rem] font-semibold leading-tight text-foreground sm:text-[1.8rem]">
                       你好，欢迎咨询南科大招生。
                     </h2>
                   </div>
@@ -64,7 +64,7 @@ export function ThreadHeader({
             transition={HEADER_TRANSITION}
             className="overflow-hidden"
           >
-            <div className="surface-glass mx-auto grid h-[52px] w-full max-w-4xl grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-[1.15rem] border border-white/72 px-3 py-2 shadow-[0_14px_34px_rgba(24,72,71,0.1)] sm:px-4">
+            <div className="surface-glass mx-auto grid h-[51px] w-full max-w-[50.4rem] grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-[1.1rem] border border-white/72 px-3 py-2 shadow-[0_14px_34px_rgba(24,72,71,0.1)] sm:px-4">
               <div aria-hidden="true" />
 
               <button
@@ -84,7 +84,7 @@ export function ThreadHeader({
                 <TooltipIconButton
                   size="lg"
                   className="size-9 cursor-pointer rounded-full p-1.5 transition-colors duration-150 ease-in-out hover:bg-black/5"
-                  tooltip="新建咨询"
+                  tooltip="开始新对话"
                   variant="ghost"
                   onClick={onResetThread}
                 >
