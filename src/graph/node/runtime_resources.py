@@ -5,15 +5,23 @@ from pathlib import Path
 
 
 def bootstrap_runtime_dirs(repo_root: Path, runtime_name: str = "graph-demo") -> Path:
-    runtime_root = repo_root / ".runtime" / runtime_name
+    runtime_base = os.getenv("RUNTIME_ROOT", "").strip()
+    if runtime_base:
+        runtime_root = Path(runtime_base).expanduser()
+        if not runtime_root.is_absolute():
+            runtime_root = repo_root / runtime_root
+        runtime_root = runtime_root / runtime_name
+    else:
+        runtime_root = repo_root / ".runtime" / runtime_name
+
     (runtime_root / "logs").mkdir(parents=True, exist_ok=True)
     (runtime_root / "workflows").mkdir(parents=True, exist_ok=True)
     (runtime_root / "envs").mkdir(parents=True, exist_ok=True)
 
-    os.environ.setdefault("ROOT_DIR", str(runtime_root))
-    os.environ.setdefault("LOGS_DIR", str(runtime_root / "logs"))
-    os.environ.setdefault("WORKFLOWS_DIR", str(runtime_root / "workflows"))
-    os.environ.setdefault("ENVS_DIR", str(runtime_root / "envs"))
+    os.environ["ROOT_DIR"] = str(runtime_root)
+    os.environ["LOGS_DIR"] = str(runtime_root / "logs")
+    os.environ["WORKFLOWS_DIR"] = str(runtime_root / "workflows")
+    os.environ["ENVS_DIR"] = str(runtime_root / "envs")
     return runtime_root
 
 

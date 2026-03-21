@@ -534,6 +534,23 @@ class AdmissionGraphRuntime:
 
         return merged
 
+    def get_registry_thread(self, *, thread_id: str) -> dict[str, Any] | None:
+        if self._thread_registry is None:
+            return None
+
+        row = self._thread_registry.get_thread(thread_id)
+        if not isinstance(row, dict):
+            return None
+
+        metadata = row.get("metadata", {})
+        normalized_metadata = self._jsonable(metadata if isinstance(metadata, dict) else {})
+        return {
+            "thread_id": thread_id,
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+            "metadata": normalized_metadata if isinstance(normalized_metadata, dict) else {},
+        }
+
     def get_thread_history(self, *, thread_id: str, limit: int = 10) -> list[dict[str, Any]]:
         if self._checkpointer is None:
             return []
@@ -596,6 +613,27 @@ class AdmissionGraphRuntime:
                     fallback=self._jsonable(thread_obj.get("metadata", {}) or {}),
                 ),
                 "created_at": thread_obj.get("state_updated_at"),
+                "parent_checkpoint": None,
+                "tasks": [],
+            }
+
+        registry_row = self.get_registry_thread(thread_id=thread_id)
+        if isinstance(registry_row, dict):
+            registry_metadata = self._jsonable(registry_row.get("metadata", {}) or {})
+            return {
+                "values": {},
+                "next": [],
+                "checkpoint": {
+                    "thread_id": thread_id,
+                    "checkpoint_ns": "",
+                    "checkpoint_id": None,
+                    "checkpoint_map": None,
+                },
+                "metadata": self._resolve_thread_metadata(
+                    thread_id=thread_id,
+                    fallback=registry_metadata if isinstance(registry_metadata, dict) else {},
+                ),
+                "created_at": registry_row.get("updated_at") or registry_row.get("created_at"),
                 "parent_checkpoint": None,
                 "tasks": [],
             }

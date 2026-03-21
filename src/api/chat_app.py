@@ -330,11 +330,28 @@ def create_app() -> FastAPI:
     def get_thread(thread_id: str, request: Request) -> dict[str, Any]:
         rt = _runtime_or_503()
         state = _get_owned_thread_state(rt, request, thread_id)
+        get_registry_thread = getattr(rt, "get_registry_thread", None)
+        registry_row = (
+            get_registry_thread(thread_id=thread_id)
+            if callable(get_registry_thread)
+            else None
+        )
+        created_at = (
+            registry_row.get("created_at")
+            if isinstance(registry_row, dict)
+            else state.get("created_at")
+        )
+        updated_at = (
+            registry_row.get("updated_at")
+            if isinstance(registry_row, dict)
+            else state.get("created_at")
+        )
+        state_updated_at = state.get("created_at") or updated_at
         return {
             "thread_id": thread_id,
-            "created_at": state.get("created_at"),
-            "updated_at": state.get("created_at"),
-            "state_updated_at": state.get("created_at"),
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "state_updated_at": state_updated_at,
             "metadata": _thread_metadata(state),
             "status": "idle",
             "values": state.get("values", {}) if isinstance(state.get("values"), dict) else {},

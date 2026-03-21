@@ -159,6 +159,18 @@ cd AlayaEnrollment
 cp .env.example .env
 ```
 
+生产环境建议额外配置：
+
+```bash
+export RUNTIME_ROOT=/var/lib/alaya-enrollment/runtime
+```
+
+- `RUNTIME_ROOT` 应指向仓库外的持久目录。
+- 运行时文件会落在 `$RUNTIME_ROOT/chat-api/` 下，包括 `checkpoints.sqlite`
+  和 `thread_registry.sqlite`。
+- 当前后端运行时模型仍然是单 worker；`RUNTIME_ROOT` 只解决持久化与重启
+  一致性，不会让多 worker 自动变安全。
+
 ### 2. 启动后端
 
 前台启动：
@@ -170,13 +182,15 @@ python main.py --host 127.0.0.1 --port 8008
 后台启动：
 
 ```bash
-mkdir -p .runtime
-nohup python main.py --host 127.0.0.1 --port 8008 > .runtime/backend.log 2>&1 &
+export RUNTIME_ROOT="${RUNTIME_ROOT:-/var/lib/alaya-enrollment/runtime}"
+mkdir -p "$RUNTIME_ROOT"
+nohup python main.py --host 127.0.0.1 --port 8008 > "$RUNTIME_ROOT"/backend.log 2>&1 &
 ```
 
 - 如果需要关闭自动拉起 Milvus，可提前在服务器上运行 `docker compose -f infra/docker/milvus-compose.yml up -d`，再在后端命令追加 `--skip-infra`。
 - `API_SHARED_KEY` 会被 FastAPI 中间件校验，但密钥只由 Next.js BFF 在服务端注入；浏览器和 Nginx 都不再直接携带该值。
 - `STREAM_MAX_DURATION_SECONDS` 和 `STREAM_IDLE_TIMEOUT_SECONDS` 会保护三个流式入口：`/api/chat/stream`、`/runs/stream`、`/threads/{id}/runs/stream`。
+- 生产环境不要把 `RUNTIME_ROOT` 指回仓库目录；否则部署或清理工作区时仍然可能误删运行时数据。
 - Nginx 需要对公网流式入口做基础 IP 限流，示例：
 
 ```
@@ -200,8 +214,9 @@ server {
 cd web
 npm install
 npm run build
-mkdir -p ../.runtime
-nohup npm run start -- --hostname 0.0.0.0 --port 3000 > ../.runtime/frontend.log 2>&1 &
+export RUNTIME_ROOT="${RUNTIME_ROOT:-/var/lib/alaya-enrollment/runtime}"
+mkdir -p "$RUNTIME_ROOT"
+nohup npm run start -- --hostname 0.0.0.0 --port 3000 > "$RUNTIME_ROOT"/frontend.log 2>&1 &
 ```
 
 ### 4. 导入知识库
