@@ -141,7 +141,7 @@ python -m src.knowledge.manage query-admission-scores --province 安徽 --year 2
 
 ### 环境变量拆分
 
-- `.env`（服务器上）包含私密变量：`API_SHARED_KEY`、`BACKEND_INTERNAL_URL`、`API_RATE_LIMIT_PER_MINUTE`、各大模型 Key、Milvus/Langfuse 配置等；该文件只给后端 / Next.js 服务端读取。
+- `.env`（服务器上）包含私密变量：`API_SHARED_KEY`、`BACKEND_INTERNAL_URL`、`STREAM_MAX_DURATION_SECONDS`、`STREAM_IDLE_TIMEOUT_SECONDS`、各大模型 Key、Milvus/Langfuse 配置等；该文件只给后端 / Next.js 服务端读取。
 - `web/.env.local` 只保留 `NEXT_PUBLIC_*` 这类前端需要暴露的变量，部署脚本在构建前写入或由 CI 注入。
 
 示例：
@@ -175,13 +175,22 @@ nohup python main.py --host 127.0.0.1 --port 8008 > .runtime/backend.log 2>&1 &
 ```
 
 - 如果需要关闭自动拉起 Milvus，可提前在服务器上运行 `docker compose -f infra/docker/milvus-compose.yml up -d`，再在后端命令追加 `--skip-infra`。
-- `API_SHARED_KEY` 会被 FastAPI 中间件校验，但密钥只由 Next.js BFF 在服务端注入；浏览器和 Nginx 都不再直接携带该值。Nginx 只需要把 `/api/*` 转发给 Next.js，示例：
+- `API_SHARED_KEY` 会被 FastAPI 中间件校验，但密钥只由 Next.js BFF 在服务端注入；浏览器和 Nginx 都不再直接携带该值。
+- `STREAM_MAX_DURATION_SECONDS` 和 `STREAM_IDLE_TIMEOUT_SECONDS` 会保护三个流式入口：`/api/chat/stream`、`/runs/stream`、`/threads/{id}/runs/stream`。
+- Nginx 需要对公网流式入口做基础 IP 限流，示例：
 
 ```
-location /api/ {
-  proxy_pass http://127.0.0.1:3000;
-  proxy_buffering off;
-  proxy_read_timeout 600s;
+limit_req_zone $binary_remote_addr zone=alaya_stream_per_ip:10m rate=20r/m;
+
+server {
+  limit_req_status 429;
+
+  location = /api/chat/stream {
+    limit_req zone=alaya_stream_per_ip burst=10 nodelay;
+    proxy_pass http://127.0.0.1:3000;
+    proxy_buffering off;
+    proxy_read_timeout 600s;
+  }
 }
 ```
 
@@ -213,8 +222,10 @@ python -m script.demo_vector_search --query "本科专业" --top-k 3
 ## API 保护与限流
 
 - 设置 `API_SHARED_KEY` 后，所有除 `/health`、`/info` 以外的 FastAPI 接口都需要 `X-Api-Key` 请求头；在当前单机部署中，这个头只由 Next.js BFF 在服务端注入。
-- `API_RATE_LIMIT_PER_MINUTE`（默认 `120`）启用滑动窗口限流，对流式接口 `/api/chat/stream`、`/runs/stream`、`/threads/{id}/runs/stream` 生效。若需关闭，将其置空或设为 `0`。
-- 当前限流为进程内内存实现，多实例部署需改用 Redis/网关方案。
+- `/threads/{id}/runs/stream` 启用 per-thread single-flight；同一线程已有流式运行时，后续请求会返回 `409 THREAD_BUSY`，避免线程状态并发写乱。
+- `STREAM_MAX_DURATION_SECONDS` 和 `STREAM_IDLE_TIMEOUT_SECONDS` 会限制 `/api/chat/stream`、`/runs/stream`、`/threads/{id}/runs/stream` 的总时长和空闲时长，防止请求长期挂死占住资源。
+- 公网入口的基础 IP 限流由 Nginx `limit_req` 实现，默认只对上述三个流式路径生效，超限返回 `429`。
+- 当前 single-flight 为进程内实现，适用于单机单 worker；后续如果部署多个 worker，需要改成 Redis 或网关层的共享租约/配额模型。
 
 ## 推荐顺序
 
