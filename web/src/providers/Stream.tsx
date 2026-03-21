@@ -20,14 +20,16 @@ import { Button } from "@/components/ui/button";
 import { SustechMark } from "@/components/icons/sustech-mark";
 import { Label } from "@/components/ui/label";
 import { ArrowRight, ShieldCheck } from "lucide-react";
-import { PasswordInput } from "@/components/ui/password-input";
-import { getApiKey } from "@/lib/api-key";
 import { getClientHeaders } from "@/lib/device-id";
 import { resolveApiUrl } from "@/lib/resolve-api-url";
 import { useThreads } from "./Thread";
 import { mergeThreadLists, rememberThread } from "./thread-list";
 import { toast } from "sonner";
 import { BRAND_COPY, CONNECTION_COPY } from "@/components/thread/branding";
+import {
+  GraphConnectionInfo,
+  shouldShowConnectionForm,
+} from "./stream-connection";
 
 export type StateType = { messages: Message[]; ui?: UIMessage[] };
 
@@ -49,18 +51,12 @@ const THREAD_LIST_REFRESH_DELAY_MS = 4000;
 const DEFAULT_API_URL = "/api";
 const DEFAULT_ASSISTANT_ID = "agent";
 
-type GraphConnectionInfo = {
-  ok: boolean;
-  apiKeyRequired: boolean;
-};
-
 async function fetchGraphConnectionInfo(
   apiUrl: string,
-  apiKey: string | null,
 ): Promise<GraphConnectionInfo> {
   try {
     const res = await fetch(`${apiUrl}/info`, {
-      headers: getClientHeaders(apiKey),
+      headers: getClientHeaders(),
     });
 
     if (!res.ok) {
@@ -94,19 +90,17 @@ function showBackendConnectionToast(apiUrl: string) {
 
 const StreamSession = ({
   children,
-  apiKey,
   apiUrl,
   assistantId,
 }: {
   children: ReactNode;
-  apiKey: string | null;
   apiUrl: string;
   assistantId: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads, threadScopeKey } = useThreads();
   const resolvedApiUrl = resolveApiUrl(apiUrl);
-  const defaultHeaders = useMemo(() => getClientHeaders(apiKey), [apiKey]);
+  const defaultHeaders = useMemo(() => getClientHeaders(), []);
   const latestThreadScopeRef = useRef<string | null>(threadScopeKey);
   const previousThreadScopeRef = useRef<string | null>(threadScopeKey);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,7 +136,6 @@ const StreamSession = ({
 
   const streamValue = useTypedStream({
     apiUrl: resolvedApiUrl,
-    apiKey: apiKey ?? undefined,
     defaultHeaders,
     assistantId,
     threadId: threadId ?? null,
@@ -197,9 +190,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
   const envAssistantId: string | undefined =
     process.env.NEXT_PUBLIC_ASSISTANT_ID;
-  const envApiKey: string | undefined =
-    process.env.NEXT_PUBLIC_API_SHARED_KEY ||
-    process.env.NEXT_PUBLIC_LANGSMITH_API_KEY;
 
   const [apiUrl, setApiUrl] = useQueryState("apiUrl", {
     defaultValue: envApiUrl || "",
@@ -207,17 +197,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [assistantId, setAssistantId] = useQueryState("assistantId", {
     defaultValue: envAssistantId || "",
   });
-  const [apiKey, _setApiKey] = useState(() => {
-    const storedKey = getApiKey();
-    return storedKey || envApiKey || "";
-  });
   const [connectionInfo, setConnectionInfo] =
     useState<GraphConnectionInfo | null>(null);
-
-  const setApiKey = (key: string) => {
-    window.localStorage.setItem("lg:chat:apiKey", key);
-    _setApiKey(key);
-  };
 
   const finalApiUrl = apiUrl || envApiUrl || DEFAULT_API_URL;
   const finalAssistantId = assistantId || envAssistantId || DEFAULT_ASSISTANT_ID;
@@ -232,7 +213,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     let cancelled = false;
     setConnectionInfo(null);
 
-    fetchGraphConnectionInfo(resolvedFinalApiUrl, apiKey).then((info) => {
+    fetchGraphConnectionInfo(resolvedFinalApiUrl).then((info) => {
       if (cancelled) {
         return;
       }
@@ -246,14 +227,15 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     return () => {
       cancelled = true;
     };
-  }, [apiKey, finalApiUrl, finalAssistantId, resolvedFinalApiUrl]);
+  }, [finalApiUrl, finalAssistantId, resolvedFinalApiUrl]);
 
   const waitingForConnectionInfo =
     Boolean(finalApiUrl && finalAssistantId) && connectionInfo === null;
-  const showConnectionForm =
-    !finalApiUrl ||
-    !finalAssistantId ||
-    Boolean(connectionInfo?.apiKeyRequired && !apiKey);
+  const showConnectionForm = shouldShowConnectionForm({
+    finalApiUrl,
+    finalAssistantId,
+    connectionInfo,
+  });
 
   if (waitingForConnectionInfo) {
     return (
@@ -266,11 +248,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   }
 
   if (showConnectionForm) {
-    const apiKeyHelpText =
-      connectionInfo?.apiKeyRequired && !apiKey
-        ? "The backend currently requires an API key. Enter the shared key before continuing."
-        : CONNECTION_COPY.apiKeyHint;
-
     return (
       <div className="flex min-h-screen w-full items-center justify-center px-4 py-10">
         <div className="surface-glass animate-in fade-in-0 zoom-in-95 flex w-full max-w-4xl overflow-hidden rounded-[2rem] border border-white/70 shadow-[0_24px_80px_rgba(24,72,71,0.18)]">
@@ -295,8 +272,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 Connection Settings
               </div>
               <p className="text-sm leading-6 text-white/75">
-                Configure the API endpoint, assistant ID, and shared key used by
-                this browser session before starting a conversation.
+                Configure the API endpoint and assistant ID used by this browser
+                session before starting a conversation.
               </p>
             </div>
           </div>
@@ -328,10 +305,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 const formData = new FormData(form);
                 const nextApiUrl = formData.get("apiUrl") as string;
                 const nextAssistantId = formData.get("assistantId") as string;
-                const nextApiKey = formData.get("apiKey") as string;
 
                 setApiUrl(nextApiUrl);
-                setApiKey(nextApiKey);
                 setAssistantId(nextAssistantId);
 
                 form.reset();
@@ -374,24 +349,10 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="apiKey">{CONNECTION_COPY.apiKeyLabel}</Label>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  {apiKeyHelpText}
-                </p>
-                <PasswordInput
-                  id="apiKey"
-                  name="apiKey"
-                  defaultValue={apiKey ?? ""}
-                  className="h-12 rounded-2xl bg-white/70"
-                  placeholder="shared-api-key"
-                />
-              </div>
-
               <div className="flex flex-col gap-4 border-t border-border/60 pt-5 sm:flex-row sm:items-center sm:justify-between">
                 <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                  The saved API key is stored only in this browser and is attached
-                  to future requests as the `X-Api-Key` header.
+                  The browser now connects through a same-origin BFF route, so no
+                  shared API key needs to be entered here.
                 </p>
                 <Button
                   type="submit"
@@ -412,7 +373,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   return (
     <StreamSession
-      apiKey={apiKey}
       apiUrl={finalApiUrl}
       assistantId={finalAssistantId}
     >

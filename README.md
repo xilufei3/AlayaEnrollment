@@ -141,7 +141,7 @@ python -m src.knowledge.manage query-admission-scores --province 安徽 --year 2
 
 ### 环境变量拆分
 
-- `.env`（服务器上）包含私密变量：`API_SHARED_KEY`、`API_RATE_LIMIT_PER_MINUTE`、各大模型 Key、Milvus/Langfuse 配置等；该文件只给后端读取。
+- `.env`（服务器上）包含私密变量：`API_SHARED_KEY`、`BACKEND_INTERNAL_URL`、`API_RATE_LIMIT_PER_MINUTE`、各大模型 Key、Milvus/Langfuse 配置等；该文件只给后端 / Next.js 服务端读取。
 - `web/.env.local` 只保留 `NEXT_PUBLIC_*` 这类前端需要暴露的变量，部署脚本在构建前写入或由 CI 注入。
 
 示例：
@@ -164,23 +164,22 @@ cp .env.example .env
 前台启动：
 
 ```bash
-python main.py --host 0.0.0.0 --port 8008
+python main.py --host 127.0.0.1 --port 8008
 ```
 
 后台启动：
 
 ```bash
 mkdir -p .runtime
-nohup python main.py --host 0.0.0.0 --port 8008 > .runtime/backend.log 2>&1 &
+nohup python main.py --host 127.0.0.1 --port 8008 > .runtime/backend.log 2>&1 &
 ```
 
 - 如果需要关闭自动拉起 Milvus，可提前在服务器上运行 `docker compose -f infra/docker/milvus-compose.yml up -d`，再在后端命令追加 `--skip-infra`。
-- `API_SHARED_KEY` 会被 FastAPI 中间件校验，请在反向代理（如 Nginx）中注入相同的 `X-Api-Key` 头，示例：
+- `API_SHARED_KEY` 会被 FastAPI 中间件校验，但密钥只由 Next.js BFF 在服务端注入；浏览器和 Nginx 都不再直接携带该值。Nginx 只需要把 `/api/*` 转发给 Next.js，示例：
 
 ```
 location /api/ {
-  proxy_pass http://127.0.0.1:8008;
-  proxy_set_header X-Api-Key your-shared-key;
+  proxy_pass http://127.0.0.1:3000;
   proxy_buffering off;
   proxy_read_timeout 600s;
 }
@@ -213,7 +212,7 @@ python -m script.demo_vector_search --query "本科专业" --top-k 3
 
 ## API 保护与限流
 
-- 设置 `API_SHARED_KEY` 后，所有除 `/health`、`/info` 以外的接口都需要 `X-Api-Key` 请求头，适合单服务器场景配合 Nginx 注入。
+- 设置 `API_SHARED_KEY` 后，所有除 `/health`、`/info` 以外的 FastAPI 接口都需要 `X-Api-Key` 请求头；在当前单机部署中，这个头只由 Next.js BFF 在服务端注入。
 - `API_RATE_LIMIT_PER_MINUTE`（默认 `120`）启用滑动窗口限流，对流式接口 `/api/chat/stream`、`/runs/stream`、`/threads/{id}/runs/stream` 生效。若需关闭，将其置空或设为 `0`。
 - 当前限流为进程内内存实现，多实例部署需改用 Redis/网关方案。
 

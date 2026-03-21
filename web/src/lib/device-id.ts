@@ -47,16 +47,8 @@ export function getDeviceId(): string {
   }
 }
 
-export function getClientHeaders(
-  apiKey?: string | null,
-): Record<string, string> {
-  const headers: Record<string, string> = {
+export function getClientHeaders(): Record<string, string> {
+  return {
     "X-Device-Id": getDeviceId(),
   };
-
-  if (apiKey) {
-    headers["X-Api-Key"] = apiKey;
-  }
-
-  return headers;
 }

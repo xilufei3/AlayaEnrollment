@@ -1,4 +1,3 @@
-import { getApiKey } from "@/lib/api-key";
 import { getDeviceId } from "@/lib/device-id";
 import { Thread } from "@langchain/langgraph-sdk";
 import { useQueryState } from "nuqs";
@@ -67,7 +66,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const getThreads = useCallback(async (): Promise<Thread[]> => {
     if (!resolvedApiUrl || !resolvedAssistantId) return [];
 
-    const client = createClient(resolvedApiUrl, getApiKey() ?? undefined);
+    const client = createClient(resolvedApiUrl);
 
     const threads = await client.threads.search({
       metadata: getThreadSearchMetadata(
@@ -86,7 +85,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         return null;
       }
 
-      const client = createClient(resolvedApiUrl, getApiKey() ?? undefined);
+      const client = createClient(resolvedApiUrl);
       const payload = await client.threads.get(threadId);
       const thread = resolveThreadLookupResponse(payload);
       if (!thread) {

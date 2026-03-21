@@ -23,8 +23,8 @@ The app will be served at `http://localhost:3000`.
 ## Environment Variables
 
 - Copy `web/.env.example` to `web/.env.local` (or configure env vars in your deployment runner).
-- Only `NEXT_PUBLIC_*` values belong here. Keep private API keys in the root `.env` for the backend.
-- Default `NEXT_PUBLIC_API_URL=/api` assumes you run behind a reverse proxy that forwards `/api/*` to FastAPI. When developing without Nginx, change it to `http://localhost:8008`.
+- Only `NEXT_PUBLIC_*` values belong here. Keep private API keys and `BACKEND_INTERNAL_URL` in the root `.env` for the Next.js server and backend.
+- Default `NEXT_PUBLIC_API_URL=/api` assumes the browser talks to the Next.js BFF. The BFF then forwards approved `/api/*` routes to FastAPI using the server-only `API_SHARED_KEY`.
 
 ## Build
 
