@@ -1,6 +1,7 @@
 "use client";
 
 const DEVICE_ID_STORAGE_KEY = "device_id";
+let memoryDeviceId: string | null = null;
 
 function createDeviceId(): string {
   if (
@@ -13,9 +14,16 @@ function createDeviceId(): string {
   return `device-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
+function getMemoryDeviceId(): string {
+  if (!memoryDeviceId) {
+    memoryDeviceId = createDeviceId();
+  }
+  return memoryDeviceId;
+}
+
 export function getDeviceId(): string {
   if (typeof window === "undefined") {
-    return "anonymous";
+    return createDeviceId();
   }
 
   try {
@@ -26,7 +34,16 @@ export function getDeviceId(): string {
     }
     return id;
   } catch {
-    return "anonymous";
+    try {
+      let id = window.sessionStorage.getItem(DEVICE_ID_STORAGE_KEY);
+      if (!id) {
+        id = createDeviceId();
+        window.sessionStorage.setItem(DEVICE_ID_STORAGE_KEY, id);
+      }
+      return id;
+    } catch {
+      return getMemoryDeviceId();
+    }
   }
 }
 

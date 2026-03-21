@@ -47,6 +47,11 @@ import {
 } from "./top-bar-visibility";
 import { Button } from "../ui/button";
 
+function isThreadNotFoundMessage(message: string | undefined): boolean {
+  if (!message) return false;
+  return message.includes("Thread not found");
+}
+
 const PROMPT_THEMES = [
   {
     accent: "#1D9E75",
@@ -297,6 +302,9 @@ export function Thread() {
       }
 
       lastError.current = message;
+      if (isThreadNotFoundMessage(message)) {
+        setThreadId(null);
+      }
       toast.error("Message failed to send. Please try again shortly.", {
         description: (
           <p>

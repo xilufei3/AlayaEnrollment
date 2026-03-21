@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildThreadScopeKey,
   getThreadSearchMetadata,
   resolveThreadConnection,
 } from "./thread-query-config.ts";
@@ -56,4 +57,24 @@ test("uses assistant_id for UUID assistant ids", () => {
 test("uses graph_id for non-UUID assistant ids", () => {
   const metadata = getThreadSearchMetadata("agent", "device-1");
   assert.deepEqual(metadata, { graph_id: "agent", device_id: "device-1" });
+});
+
+test("builds a stable thread scope key from connection metadata", () => {
+  const scopeKey = buildThreadScopeKey({
+    apiUrl: " http://localhost:8008 ",
+    assistantId: " agent ",
+    deviceId: " device-1 ",
+  });
+
+  assert.equal(scopeKey, "http://localhost:8008::agent::device-1");
+});
+
+test("returns null scope key when any connection part is missing", () => {
+  const scopeKey = buildThreadScopeKey({
+    apiUrl: "http://localhost:8008",
+    assistantId: null,
+    deviceId: "device-1",
+  });
+
+  assert.equal(scopeKey, null);
 });

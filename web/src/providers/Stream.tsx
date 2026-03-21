@@ -5,6 +5,7 @@ import React, {
   useState,
   useEffect,
   useMemo,
+  useRef,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
@@ -24,6 +25,7 @@ import { getApiKey } from "@/lib/api-key";
 import { getClientHeaders } from "@/lib/device-id";
 import { resolveApiUrl } from "@/lib/resolve-api-url";
 import { useThreads } from "./Thread";
+import { mergeThreadLists, rememberThread } from "./thread-list";
 import { toast } from "sonner";
 import { BRAND_COPY, CONNECTION_COPY } from "@/components/thread/branding";
 
@@ -43,24 +45,51 @@ const useTypedStream = useStream<
 type StreamContextType = ReturnType<typeof useTypedStream>;
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
-async function sleep(ms = 4000) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const THREAD_LIST_REFRESH_DELAY_MS = 4000;
+const DEFAULT_API_URL = "/api";
+const DEFAULT_ASSISTANT_ID = "agent";
 
-async function checkGraphStatus(
+type GraphConnectionInfo = {
+  ok: boolean;
+  apiKeyRequired: boolean;
+};
+
+async function fetchGraphConnectionInfo(
   apiUrl: string,
   apiKey: string | null,
-): Promise<boolean> {
+): Promise<GraphConnectionInfo> {
   try {
     const res = await fetch(`${apiUrl}/info`, {
       headers: getClientHeaders(apiKey),
     });
 
-    return res.ok;
+    if (!res.ok) {
+      return { ok: false, apiKeyRequired: false };
+    }
+
+    const payload = (await res.json()) as { api_key_required?: boolean } | null;
+    return {
+      ok: true,
+      apiKeyRequired: Boolean(payload?.api_key_required),
+    };
   } catch (e) {
     console.error(e);
-    return false;
+    return { ok: false, apiKeyRequired: false };
   }
+}
+
+function showBackendConnectionToast(apiUrl: string) {
+  toast.error("Backend connection failed", {
+    description: () => (
+      <p>
+        Unable to reach <code>{apiUrl}</code>. Check that the FastAPI service is
+        running and that the URL is correct.
+      </p>
+    ),
+    duration: 10000,
+    richColors: true,
+    closeButton: true,
+  });
 }
 
 const StreamSession = ({
@@ -75,9 +104,42 @@ const StreamSession = ({
   assistantId: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { getThreads, setThreads } = useThreads();
+  const { getThreads, setThreads, threadScopeKey } = useThreads();
   const resolvedApiUrl = resolveApiUrl(apiUrl);
   const defaultHeaders = useMemo(() => getClientHeaders(apiKey), [apiKey]);
+  const latestThreadScopeRef = useRef<string | null>(threadScopeKey);
+  const previousThreadScopeRef = useRef<string | null>(threadScopeKey);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    latestThreadScopeRef.current = threadScopeKey;
+  }, [threadScopeKey]);
+
+  useEffect(() => {
+    const previousScopeKey = previousThreadScopeRef.current;
+    previousThreadScopeRef.current = threadScopeKey;
+
+    if (previousScopeKey && previousScopeKey !== threadScopeKey) {
+      setThreadId(null);
+    }
+  }, [setThreadId, threadScopeKey]);
+
+  useEffect(() => {
+    if (!threadScopeKey && refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+  }, [threadScopeKey]);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const streamValue = useTypedStream({
     apiUrl: resolvedApiUrl,
     apiKey: apiKey ?? undefined,
@@ -91,30 +153,36 @@ const StreamSession = ({
       });
     },
     onThreadId: (id) => {
+      const refreshScopeKey = latestThreadScopeRef.current;
+      setThreads((prev) => rememberThread(prev, id));
       setThreadId(id);
-      // Refetch threads list when thread ID changes.
-      // Wait for some seconds before fetching so we're able to get the new thread that was created.
-      sleep().then(() => getThreads().then(setThreads).catch(console.error));
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+
+      // Refetch after the backend has had a chance to persist the new thread.
+      refreshTimerRef.current = setTimeout(() => {
+        if (!refreshScopeKey || latestThreadScopeRef.current !== refreshScopeKey) {
+          return;
+        }
+
+        getThreads()
+          .then((threads) => {
+            if (latestThreadScopeRef.current !== refreshScopeKey) {
+              return;
+            }
+
+            setThreads((prev) => mergeThreadLists(prev, threads));
+          })
+          .catch(console.error)
+          .finally(() => {
+            if (refreshTimerRef.current) {
+              refreshTimerRef.current = null;
+            }
+          });
+      }, THREAD_LIST_REFRESH_DELAY_MS);
     },
   });
-
-  useEffect(() => {
-    checkGraphStatus(resolvedApiUrl, apiKey).then((ok) => {
-      if (!ok) {
-        toast.error("未能连接招生智能体服务", {
-          description: () => (
-            <p>
-              请确认服务已运行于 <code>{resolvedApiUrl}</code>，并检查当前访问
-              密钥与前端环境配置是否正确。
-            </p>
-          ),
-          duration: 10000,
-          richColors: true,
-          closeButton: true,
-        });
-      }
-    });
-  }, [apiKey, resolvedApiUrl, defaultHeaders]);
 
   return (
     <StreamContext.Provider value={streamValue}>
@@ -123,45 +191,86 @@ const StreamSession = ({
   );
 };
 
-// Default values for the form
-const DEFAULT_API_URL = "/api";
-const DEFAULT_ASSISTANT_ID = "agent";
-
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
-  // Get environment variables
   const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
   const envAssistantId: string | undefined =
     process.env.NEXT_PUBLIC_ASSISTANT_ID;
   const envApiKey: string | undefined =
+    process.env.NEXT_PUBLIC_API_SHARED_KEY ||
     process.env.NEXT_PUBLIC_LANGSMITH_API_KEY;
 
-  // Use URL params with env var fallbacks
   const [apiUrl, setApiUrl] = useQueryState("apiUrl", {
     defaultValue: envApiUrl || "",
   });
   const [assistantId, setAssistantId] = useQueryState("assistantId", {
     defaultValue: envAssistantId || "",
   });
-
-  // For API key, use localStorage with env var fallback
   const [apiKey, _setApiKey] = useState(() => {
     const storedKey = getApiKey();
     return storedKey || envApiKey || "";
   });
+  const [connectionInfo, setConnectionInfo] =
+    useState<GraphConnectionInfo | null>(null);
 
   const setApiKey = (key: string) => {
     window.localStorage.setItem("lg:chat:apiKey", key);
     _setApiKey(key);
   };
 
-  // Determine final values to use, prioritizing URL params then env vars
   const finalApiUrl = apiUrl || envApiUrl || DEFAULT_API_URL;
   const finalAssistantId = assistantId || envAssistantId || DEFAULT_ASSISTANT_ID;
+  const resolvedFinalApiUrl = resolveApiUrl(finalApiUrl);
 
-  // If we're missing any required values, show the form
-  if (!finalApiUrl || !finalAssistantId) {
+  useEffect(() => {
+    if (!finalApiUrl || !finalAssistantId) {
+      setConnectionInfo(null);
+      return;
+    }
+
+    let cancelled = false;
+    setConnectionInfo(null);
+
+    fetchGraphConnectionInfo(resolvedFinalApiUrl, apiKey).then((info) => {
+      if (cancelled) {
+        return;
+      }
+
+      setConnectionInfo(info);
+      if (!info.ok) {
+        showBackendConnectionToast(resolvedFinalApiUrl);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiKey, finalApiUrl, finalAssistantId, resolvedFinalApiUrl]);
+
+  const waitingForConnectionInfo =
+    Boolean(finalApiUrl && finalAssistantId) && connectionInfo === null;
+  const showConnectionForm =
+    !finalApiUrl ||
+    !finalAssistantId ||
+    Boolean(connectionInfo?.apiKeyRequired && !apiKey);
+
+  if (waitingForConnectionInfo) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center px-4 py-10">
+        <div className="surface-glass flex w-full max-w-xl items-center justify-center rounded-[2rem] border border-white/70 px-8 py-12 text-sm text-muted-foreground shadow-[0_24px_80px_rgba(24,72,71,0.12)]">
+          Checking backend connection...
+        </div>
+      </div>
+    );
+  }
+
+  if (showConnectionForm) {
+    const apiKeyHelpText =
+      connectionInfo?.apiKeyRequired && !apiKey
+        ? "The backend currently requires an API key. Enter the shared key before continuing."
+        : CONNECTION_COPY.apiKeyHint;
+
     return (
       <div className="flex min-h-screen w-full items-center justify-center px-4 py-10">
         <div className="surface-glass animate-in fade-in-0 zoom-in-95 flex w-full max-w-4xl overflow-hidden rounded-[2rem] border border-white/70 shadow-[0_24px_80px_rgba(24,72,71,0.18)]">
@@ -183,10 +292,11 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
             <div className="rounded-[1.5rem] border border-white/15 bg-white/10 p-5">
               <div className="mb-3 flex items-center gap-2 text-sm font-medium">
                 <ShieldCheck className="size-4" />
-                配置完成后即可进入咨询界面
+                Connection Settings
               </div>
               <p className="text-sm leading-6 text-white/75">
-                若本项目已经通过环境变量注入默认值，终端用户通常不会看到这个页面。
+                Configure the API endpoint, assistant ID, and shared key used by
+                this browser session before starting a conversation.
               </p>
             </div>
           </div>
@@ -216,13 +326,13 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
                 const form = e.target as HTMLFormElement;
                 const formData = new FormData(form);
-                const apiUrl = formData.get("apiUrl") as string;
-                const assistantId = formData.get("assistantId") as string;
-                const apiKey = formData.get("apiKey") as string;
+                const nextApiUrl = formData.get("apiUrl") as string;
+                const nextAssistantId = formData.get("assistantId") as string;
+                const nextApiKey = formData.get("apiKey") as string;
 
-                setApiUrl(apiUrl);
-                setApiKey(apiKey);
-                setAssistantId(assistantId);
+                setApiUrl(nextApiUrl);
+                setApiKey(nextApiKey);
+                setAssistantId(nextAssistantId);
 
                 form.reset();
               }}
@@ -267,22 +377,28 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
               <div className="flex flex-col gap-2">
                 <Label htmlFor="apiKey">{CONNECTION_COPY.apiKeyLabel}</Label>
                 <p className="text-sm leading-6 text-muted-foreground">
-                  {CONNECTION_COPY.apiKeyHint}
+                  {apiKeyHelpText}
                 </p>
                 <PasswordInput
                   id="apiKey"
                   name="apiKey"
                   defaultValue={apiKey ?? ""}
                   className="h-12 rounded-2xl bg-white/70"
-                  placeholder="lsv2_pt_..."
+                  placeholder="shared-api-key"
                 />
               </div>
 
               <div className="flex flex-col gap-4 border-t border-border/60 pt-5 sm:flex-row sm:items-center sm:justify-between">
                 <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                  页面部署给真实用户前，建议优先通过环境变量写入默认配置，避免访客手动输入服务参数。
+                  The saved API key is stored only in this browser and is attached
+                  to future requests as the `X-Api-Key` header.
                 </p>
-                <Button type="submit" size="lg" variant="brand" className="h-12 rounded-full px-6">
+                <Button
+                  type="submit"
+                  size="lg"
+                  variant="brand"
+                  className="h-12 rounded-full px-6"
+                >
                   {CONNECTION_COPY.submitLabel}
                   <ArrowRight className="size-5" />
                 </Button>
@@ -305,7 +421,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   );
 };
 
-// Create a custom hook to use the context
 export const useStreamContext = (): StreamContextType => {
   const context = useContext(StreamContext);
   if (context === undefined) {

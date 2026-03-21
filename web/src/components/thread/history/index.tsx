@@ -17,6 +17,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { BRAND_COPY } from "../branding";
 import { SustechMark } from "@/components/icons/sustech-mark";
 import { cn } from "@/lib/utils";
+import { mergeThreadLists } from "@/providers/thread-list";
 
 function ThreadList({
   threads,
@@ -102,28 +103,64 @@ export default function ThreadHistory() {
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
-  const [hasFetchedThreads, setHasFetchedThreads] = useState(false);
-
-  const { getThreads, threads, setThreads, threadsLoading, setThreadsLoading } =
+  const { getThreads, getThread, threads, setThreads, threadsLoading, setThreadsLoading } =
     useThreads();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    let cancelled = false;
     setThreadsLoading(true);
     getThreads()
-      .then(setThreads)
-      .catch(console.error)
+      .then((fetchedThreads) => {
+        if (cancelled) return;
+        setThreads((prev) => mergeThreadLists(prev, fetchedThreads));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error(error);
+      })
       .finally(() => {
+        if (cancelled) return;
         setThreadsLoading(false);
-        setHasFetchedThreads(true);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [getThreads, setThreads, setThreadsLoading]);
 
   useEffect(() => {
-    if (!hasFetchedThreads || threadsLoading || !threadId) return;
-    if (threads.some((thread) => thread.thread_id === threadId)) return;
-    setThreadId(null);
-  }, [hasFetchedThreads, setThreadId, threadId, threads, threadsLoading]);
+    if (!threadId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    getThread(threadId)
+      .then((thread) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (!thread) {
+          setThreadId(null);
+          return;
+        }
+
+        setThreads((prev) => mergeThreadLists(prev, [thread]));
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        console.error(error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getThread, setThreadId, setThreads, threadId]);
 
   return (
     <>

@@ -10,6 +10,26 @@ export function getThreadSearchMetadata(
   return { graph_id: assistantId, device_id: deviceId };
 }
 
+export function buildThreadScopeKey({
+  apiUrl,
+  assistantId,
+  deviceId,
+}: {
+  apiUrl: string | null;
+  assistantId: string | null;
+  deviceId: string | null;
+}): string | null {
+  const resolvedApiUrl = firstNonEmpty(apiUrl);
+  const resolvedAssistantId = firstNonEmpty(assistantId);
+  const resolvedDeviceId = firstNonEmpty(deviceId);
+
+  if (!resolvedApiUrl || !resolvedAssistantId || !resolvedDeviceId) {
+    return null;
+  }
+
+  return `${resolvedApiUrl}::${resolvedAssistantId}::${resolvedDeviceId}`;
+}
+
 export function resolveThreadConnection({
   apiUrlFromQuery,
   assistantIdFromQuery,
@@ -36,7 +56,7 @@ export function resolveThreadConnection({
 function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) {
-      return value;
+      return value.trim();
     }
   }
   return null;
