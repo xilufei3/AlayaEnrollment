@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import os
+import time
 from threading import Lock
 from typing import Any, AsyncIterator, Sequence
 
@@ -10,6 +11,22 @@ from langchain_community.document_compressors import JinaRerank
 from langchain_community.document_compressors.jina_rerank import JINA_API_URL
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
+
+
+def _record_llm_ok(model_kind: str, duration: float) -> None:
+    try:
+        from ..api.observability import record_llm_request
+        record_llm_request(model_kind=model_kind, duration_seconds=duration, success=True)
+    except Exception:
+        pass
+
+
+def _record_llm_err(model_kind: str, duration: float) -> None:
+    try:
+        from ..api.observability import record_llm_request
+        record_llm_request(model_kind=model_kind, duration_seconds=duration, success=False)
+    except Exception:
+        pass
 
 
 DEFAULT_QWEN_BASE_URL = "http://star.sustech.edu.cn/service/model/qwen35/v1"
@@ -124,16 +141,23 @@ class _TimeoutAwareChatModel:
         raise exc
 
     async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        start = time.monotonic()
         try:
-            return await self._inner.ainvoke(*args, **kwargs)
+            result = await self._inner.ainvoke(*args, **kwargs)
+            _record_llm_ok(self._model_kind, time.monotonic() - start)
+            return result
         except Exception as exc:
+            _record_llm_err(self._model_kind, time.monotonic() - start)
             self._raise_timeout(exc)
 
     async def astream(self, *args: Any, **kwargs: Any) -> AsyncIterator[Any]:
+        start = time.monotonic()
         try:
             async for chunk in self._inner.astream(*args, **kwargs):
                 yield chunk
+            _record_llm_ok(self._model_kind, time.monotonic() - start)
         except Exception as exc:
+            _record_llm_err(self._model_kind, time.monotonic() - start)
             self._raise_timeout(exc)
 
 
@@ -182,6 +206,7 @@ class _TimeoutAwareJinaRerank:
         }
 
         attempts = self._max_retries + 1
+        start = time.monotonic()
         for attempt in range(attempts):
             try:
                 response = self._inner.session.post(
@@ -193,6 +218,7 @@ class _TimeoutAwareJinaRerank:
                 if "results" not in payload:
                     raise RuntimeError(payload["detail"])
 
+                _record_llm_ok(self._model_kind, time.monotonic() - start)
                 return [
                     {
                         "index": item["index"],
@@ -204,11 +230,13 @@ class _TimeoutAwareJinaRerank:
                 if _is_timeout_exception(exc):
                     if attempt + 1 < attempts:
                         continue
+                    _record_llm_err(self._model_kind, time.monotonic() - start)
                     raise ModelRequestTimeoutError(
                         model_kind=self._model_kind,
                         provider=self._provider,
                         timeout_seconds=self._timeout_seconds,
                     ) from exc
+                _record_llm_err(self._model_kind, time.monotonic() - start)
                 raise
 
         raise RuntimeError("unreachable")

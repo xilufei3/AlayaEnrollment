@@ -25,3 +25,6 @@ langfuse==4.0.0
 
 # Vector store
 pymilvus==2.6.9
+
+# Observability
+prometheus_client>=0.20,<1.0
