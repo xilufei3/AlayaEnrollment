@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from langchain_core.documents import Document
@@ -11,6 +12,14 @@ from ..schemas import RAGState, SearchPlan
 
 
 logger = logging.getLogger(__name__)
+
+
+def _record_retrieval(mode: str, duration: float, success: bool) -> None:
+    try:
+        from ....api.observability import record_retrieval
+        record_retrieval(mode=mode, duration_seconds=duration, success=success)
+    except Exception:
+        pass
 
 _SEARCH_MODE_BY_STRATEGY: dict[str, str] = {
     "vector_keyword_hybrid": SEARCH_HYBRID,
@@ -75,6 +84,7 @@ def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
         filter_expr = str(plan.get("filter_expr") or "").strip() or None
 
         try:
+            start = time.monotonic()
             hits = await asyncio.to_thread(
                 lambda: search_backend.search(
                     query=retrieval_query,
@@ -83,6 +93,7 @@ def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
                     mode=search_mode,
                 )
             )
+            _record_retrieval(search_mode, time.monotonic() - start, True)
             docs = [_result_to_document(hit) for hit in hits]
             logger.debug(
                 "VectorManager retrieval done.\n"
@@ -91,6 +102,7 @@ def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
                 f"docs={len(docs)}"
             )
         except Exception as exc:
+            _record_retrieval(search_mode, time.monotonic() - start, False)
             logger.error(f"VectorManager retrieval error {type(exc).__name__}: {exc}")
             docs = []
 

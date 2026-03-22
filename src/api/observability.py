@@ -59,6 +59,43 @@ try:
         buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0),
         registry=_REGISTRY,
     )
+    RETRIEVAL_REQUESTS_TOTAL = Counter(
+        "retrieval_requests_total",
+        "Total vector retrieval requests",
+        ["mode", "status"],
+        registry=_REGISTRY,
+    )
+    RETRIEVAL_DURATION = Histogram(
+        "retrieval_duration_seconds",
+        "Vector retrieval latency",
+        ["mode"],
+        buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0),
+        registry=_REGISTRY,
+    )
+    SQL_QUERY_TOTAL = Counter(
+        "sql_query_total",
+        "Total SQL query requests",
+        ["status"],
+        registry=_REGISTRY,
+    )
+    SQL_QUERY_DURATION = Histogram(
+        "sql_query_duration_seconds",
+        "SQL query latency",
+        buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0),
+        registry=_REGISTRY,
+    )
+    EMBEDDING_REQUESTS_TOTAL = Counter(
+        "embedding_requests_total",
+        "Total embedding requests",
+        ["status"],
+        registry=_REGISTRY,
+    )
+    EMBEDDING_DURATION = Histogram(
+        "embedding_duration_seconds",
+        "Embedding service latency",
+        buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0),
+        registry=_REGISTRY,
+    )
     _HAS_PROMETHEUS = True
 except ImportError:
     _HAS_PROMETHEUS = False
@@ -67,6 +104,12 @@ except ImportError:
     HTTP_REQUEST_DURATION = None
     LLM_REQUESTS_TOTAL = None
     LLM_REQUEST_DURATION = None
+    RETRIEVAL_REQUESTS_TOTAL = None
+    RETRIEVAL_DURATION = None
+    SQL_QUERY_TOTAL = None
+    SQL_QUERY_DURATION = None
+    EMBEDDING_REQUESTS_TOTAL = None
+    EMBEDDING_DURATION = None
 
 
 def record_llm_request(
@@ -81,6 +124,32 @@ def record_llm_request(
     status = "ok" if success else "error"
     LLM_REQUESTS_TOTAL.labels(model_kind=model_kind, status=status).inc()
     LLM_REQUEST_DURATION.labels(model_kind=model_kind).observe(duration_seconds)
+
+
+def record_retrieval(
+    *,
+    mode: str,
+    duration_seconds: float,
+    success: bool,
+) -> None:
+    if not _HAS_PROMETHEUS:
+        return
+    RETRIEVAL_REQUESTS_TOTAL.labels(mode=mode, status="ok" if success else "error").inc()
+    RETRIEVAL_DURATION.labels(mode=mode).observe(duration_seconds)
+
+
+def record_sql_query(*, duration_seconds: float, success: bool) -> None:
+    if not _HAS_PROMETHEUS:
+        return
+    SQL_QUERY_TOTAL.labels(status="ok" if success else "error").inc()
+    SQL_QUERY_DURATION.observe(duration_seconds)
+
+
+def record_embedding(*, duration_seconds: float, success: bool) -> None:
+    if not _HAS_PROMETHEUS:
+        return
+    EMBEDDING_REQUESTS_TOTAL.labels(status="ok" if success else "error").inc()
+    EMBEDDING_DURATION.observe(duration_seconds)
 
 
 # ── Path normalization ───────────────────────────────────────

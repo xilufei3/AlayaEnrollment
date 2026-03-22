@@ -277,6 +277,52 @@ async def _load_sqlite_checkpointer(db_path: Path) -> tuple[Any, Any | None]:
     return cm_or_saver, None
 
 
+import logging as _logging
+
+_startup_logger = _logging.getLogger("alaya.startup")
+
+# 必须设置的环境变量（值不能为空或 placeholder）
+_REQUIRED_ENV_VARS: tuple[str, ...] = (
+    "QWEN_API_KEY",
+    "JINA_API_KEY",
+)
+
+# 至少其一必须设置
+_REQUIRED_ANY_ENV_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("QWEN_BASE_URL", "DEEPSEEK_BASE_URL"),
+)
+
+# 建议设置（缺失时 warning，不阻止启动）
+_RECOMMENDED_ENV_VARS: tuple[str, ...] = (
+    "API_SHARED_KEY",
+    "MILVUS_URI",
+    "AlayaData_URL",
+)
+
+
+def _validate_required_env_vars() -> None:
+    """Fail fast if critical environment variables are missing."""
+    missing: list[str] = []
+    for name in _REQUIRED_ENV_VARS:
+        val = os.getenv(name, "").strip()
+        if not val or val == "placeholder":
+            missing.append(name)
+
+    for group in _REQUIRED_ANY_ENV_GROUPS:
+        if not any(os.getenv(name, "").strip() for name in group):
+            missing.append(" | ".join(group))
+
+    if missing:
+        msg = "Missing required environment variables: " + ", ".join(missing)
+        _startup_logger.error(msg)
+        raise RuntimeError(msg)
+
+    for name in _RECOMMENDED_ENV_VARS:
+        val = os.getenv(name, "").strip()
+        if not val:
+            _startup_logger.warning("Recommended env var %s is not set", name)
+
+
 class AdmissionGraphRuntime:
     STAGE_ORDER = (
         "intent_classify",      # 意图识别
@@ -338,6 +384,7 @@ class AdmissionGraphRuntime:
     async def startup(self) -> None:
         # 最先加载 .env，确保后续所有代码（含 Langfuse）能读到环境变量
         load_dotenv_file(self.cfg.env_file)
+        _validate_required_env_vars()
         self._langfuse_public_key = None
 
         try:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 
 import requests
@@ -11,6 +12,14 @@ from urllib3.util.retry import Retry
 from ..config.settings import config
 
 logger = logging.getLogger(__name__)
+
+
+def _record_embedding(duration: float, success: bool) -> None:
+    try:
+        from ..api.observability import record_embedding
+        record_embedding(duration_seconds=duration, success=success)
+    except Exception:
+        pass
 
 
 @dataclass(slots=True)
@@ -53,12 +62,17 @@ class AlayaEmbedder:
         logger.info("AlayaEmbedder initialized: %s", self._url)
 
     def embed_query(self, query: str) -> EmbeddingResult:
-        resp = self._session.post(
-            self._url,
-            json={"query": query},
-            timeout=config.alaya.timeout,
-        )
-        resp.raise_for_status()
+        start = time.monotonic()
+        try:
+            resp = self._session.post(
+                self._url,
+                json={"query": query},
+                timeout=config.alaya.timeout,
+            )
+            resp.raise_for_status()
+        except Exception:
+            _record_embedding(time.monotonic() - start, False)
+            raise
         data = resp.json()
 
         vector = data.get("embedding_vector")
@@ -76,6 +90,7 @@ class AlayaEmbedder:
                 f"embedding dim mismatch: len(vector)={len(vector)} != dim={dim}"
             )
 
+        _record_embedding(time.monotonic() - start, True)
         return EmbeddingResult(
             embedding_vector=[float(x) for x in vector],
             embedding_model=model,

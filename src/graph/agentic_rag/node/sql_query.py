@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 from langchain_core.documents import Document
@@ -12,6 +13,14 @@ from ...utils import query_prefers_year_range as shared_query_prefers_year_range
 from ..schemas import RAGState, SQLPlan
 
 logger = logging.getLogger(__name__)
+
+
+def _record_sql(duration: float, success: bool) -> None:
+    try:
+        from ....api.observability import record_sql_query
+        record_sql_query(duration_seconds=duration, success=success)
+    except Exception:
+        pass
 
 _DEFAULT_SQL_LIMIT = 6
 _YEAR_RANGE_HINTS: tuple[str, ...] = (
@@ -71,10 +80,13 @@ def create_sql_query_node():
             limit = _DEFAULT_SQL_LIMIT
 
         try:
+            start = time.monotonic()
             rows = await asyncio.to_thread(
                 lambda: query_admission_scores(province=province, year=year, limit=limit)
             )
+            _record_sql(time.monotonic() - start, True)
         except Exception as exc:
+            _record_sql(time.monotonic() - start, False)
             logger.error(f"SQL query error {type(exc).__name__}: {exc}")
             return {"structured_results": [], "structured_chunks": []}
 

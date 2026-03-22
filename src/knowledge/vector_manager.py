@@ -43,6 +43,10 @@ class VectorManager:
         self._client = MilvusClient(uri=config.milvus.uri)
         self._collection = config.milvus.collection_name
         self._embedder = AlayaEmbedder()
+        try:
+            self._client.load_collection(self._collection)
+        except Exception as exc:
+            logger.warning("load_collection('%s') on startup: %s", self._collection, exc)
         logger.info("VectorManager: initialized")
 
     def ensure_collection(self) -> None:
@@ -187,7 +191,6 @@ class VectorManager:
         output_fields: list[str] | None = None,
         mode: str = SEARCH_HYBRID,
     ) -> list[dict[str, Any]]:
-        self._client.load_collection(self._collection)
         selected_fields = output_fields or ["content", "source_file", "category"]
 
         if mode == SEARCH_VECTOR:
