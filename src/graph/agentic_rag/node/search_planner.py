@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ...llm import get_model
+from ...llm import ModelRequestTimeoutError, get_model
 from ...prompts import SEARCH_PLANNER_SYSTEM_PROMPT
 from ...utils import (
     chunk_texts as shared_chunk_texts,
@@ -178,6 +178,8 @@ def create_search_planner_node(*, model_id: str | None = None):
                     eval_reason=eval_reason,
                     chunks=chunks,
                 )
+            except ModelRequestTimeoutError:
+                raise
             except Exception as exc:
                 logger.warning(
                     f"SearchPlanner LLM failed, fallback to rule. {type(exc).__name__}: {exc}"

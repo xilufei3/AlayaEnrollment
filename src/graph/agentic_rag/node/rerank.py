@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from langchain_core.documents import Document
 
 from ....config.settings import config
-from ...llm import get_model
+from ...llm import ModelRequestTimeoutError, get_model
 from ..schemas import RAGState
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,9 @@ def create_rerank_node():
     )
 
     async def rerank_node(state: RAGState) -> dict[str, Any]:
-        query = str(state.get("query") or "").strip()
+        search_plan = state.get("search_plan") or {}
+        rewritten_query = str(search_plan.get("vector_query") or "").strip()
+        query = rewritten_query or str(state.get("query") or "").strip()
         chunks = list(state.get("chunks") or [])
 
         if not query or not chunks:
@@ -98,6 +100,8 @@ def create_rerank_node():
             reranked = await reranker(query=query, docs=chunks)
             logger.debug(f"Rerank done. in={len(chunks)} out={len(reranked)}")
             return {"chunks": reranked}
+        except ModelRequestTimeoutError:
+            raise
         except Exception as exc:
             logger.error(f"Rerank error {type(exc).__name__}: {exc}")
             return {"chunks": chunks}

@@ -221,10 +221,15 @@ async def _load_sqlite_checkpointer(db_path: Path) -> tuple[Any, Any | None]:
 
 class AdmissionGraphRuntime:
     STAGE_ORDER = (
-        "intent_classify",   # 意图识别
-        "agentic_rag",      # Agentic RAG（检索+评估循环）
-        "generate",         # 生成答案（含 out_of_scope / 缺槽位追问 / other / RAG 回答）
+        "intent_classify",      # 意图识别
+        "out_of_scope_reply",   # 超范围拒答
+        "chitchat_reply",       # 寒暄 / 低置信度回复
+        "agentic_rag",          # Agentic RAG（检索+评估循环）
+        "slot_followup",        # 缺槽位追问
+        "generate",             # RAG 生成答案
     )
+
+    _ANSWER_NODES = {"generate", "out_of_scope_reply", "chitchat_reply", "slot_followup"}
 
     def __init__(self, cfg: RuntimeConfig) -> None:
         self.cfg = cfg
@@ -735,7 +740,7 @@ class AdmissionGraphRuntime:
                                 if isinstance(maybe_meta, dict):
                                     meta = maybe_meta
                             node_name = str((meta or {}).get("langgraph_node", "")).strip()
-                            _answer_nodes = {"generate"}
+                            _answer_nodes = self._ANSWER_NODES
                             if node_name and node_name not in _answer_nodes:
                                 continue
 
@@ -840,7 +845,7 @@ class AdmissionGraphRuntime:
                                     missing = payload.get("missing_slots") or []
                                     if missing:
                                         summary["missing_slots"] = missing
-                                elif node_name == "generate":
+                                elif node_name in self._ANSWER_NODES:
                                     answer = str(payload.get("answer", "") or "")
                                     result_answer = answer
                                     summary["answer_len"] = len(answer)

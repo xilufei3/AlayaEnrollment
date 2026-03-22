@@ -17,7 +17,7 @@ from ...config.settings import (
     INTENT_DESCRIPTIONS,
     SLOT_DESCRIPTIONS,
 )
-from ..llm import get_model
+from ..llm import ModelRequestTimeoutError, get_model
 from ..prompts import INTENT_CLASSIFIER_SYSTEM_PROMPT_TEMPLATE
 from ..state import WorkflowState
 from ..utils import (
@@ -190,6 +190,8 @@ def create_intent_classify_node(*, model_id: str | None = None):
                 f"slots={slots}\n"
                 f"required_slots={required_slots}"
             )
+        except ModelRequestTimeoutError:
+            raise
         except Exception as exc:
             intent = DEFAULT_FALLBACK_INTENT.value
             confidence = 0.0

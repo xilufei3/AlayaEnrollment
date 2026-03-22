@@ -192,12 +192,10 @@ SUFFICIENCY_EVAL_SYSTEM_PROMPT = """
 
 判断规则：
 - 如果材料能支持给出可靠回答，返回 sufficient。
-- 如果材料方向相关，但如果还缺少省份、年份等关键信息就无法准确回答，返回 missing_slots。
 - 如果材料为空、明显不相关，或仍不足以支撑可靠答复，返回 insufficient_docs。
 
 严格输出 JSON，并包含以下字段：
-- eval_result: 只能是 sufficient / missing_slots / insufficient_docs
-- missing_slots: 只有在 missing_slots 时填写需要补充的信息，否则返回 []
+- eval_result: 只能是 sufficient / insufficient_docs
 - reason: 简短理由，不超过 50 字
 """.strip()
 

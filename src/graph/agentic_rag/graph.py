@@ -5,6 +5,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from ..llm import ModelRequestTimeoutError
 from .node.merge_context import create_merge_context_node
 from .node.rerank import create_rerank_node
 from .node.retrieval import create_retrieval_node
@@ -97,12 +98,14 @@ def create_agentic_rag_node(
             "structured_results": [],
             "chunks": [],
             "eval_result": "",
-            "missing_slots": [],
+            "missing_slots": list(state.get("missing_slots") or []),
             "eval_reason": "",
         }
 
         try:
             final_state: RAGState = await rag_graph.ainvoke(rag_input)
+        except ModelRequestTimeoutError:
+            raise
         except Exception as exc:
             logger.error(f"AgenticRAG sub-graph error {type(exc).__name__}: {exc}")
             return {"chunks": [], "missing_slots": [], "structured_results": []}
