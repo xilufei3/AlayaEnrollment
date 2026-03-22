@@ -3,7 +3,7 @@ WORKDIR /app
 
 # Install dependencies first (cache-friendly)
 COPY web/package.json web/package-lock.json* ./
-RUN npm ci --ignore-scripts
+RUN npm config set registry https://registry.npmmirror.com && npm ci --ignore-scripts
 
 # Copy source and build
 COPY web/ .
