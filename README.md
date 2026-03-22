@@ -1,258 +1,174 @@
 # AlayaEnrollment
 
-招生问答项目，包含：
+南方科技大学本科招生咨询 AI 系统，包含：
 
-- FastAPI 后端服务
-- LangGraph 对话编排
-- Milvus 向量检索
-- `web/` 前端页面
+- **FastAPI 后端** — LangGraph 对话编排 + Agentic RAG
+- **Milvus 向量检索** — 混合检索（Dense + BM25 + RRF）
+- **Next.js 前端** — BFF 代理架构
+- **Nginx 反向代理** — 限流 + 安全头
 
-## 本地部署
+## 快速开始
 
-### 1. 环境准备
-
-需要先安装：
-
-- Python
-- Node.js
-- Docker / Docker Desktop
-
-### 2. 配置环境变量
-
-将 `.env.example` 复制为 `.env`，并至少检查这些变量：
-
-- `AlayaData_URL`
-- `MILVUS_URI`
-- `EMBED_DIM`
-- `DEEPSEEK_API_KEY` 或 `QWEN_API_KEY`
-
-示例：
+### 方式一：Docker 全栈（推荐）
 
 ```bash
-cp .env.example .env
+cp .env.example .env          # 配置环境变量（至少填 QWEN_API_KEY 或 DEEPSEEK_API_KEY）
+docker compose up --build -d  # 一键启动所有服务
 ```
 
-PowerShell 可用：
+启动后访问 `http://localhost`（Nginx → Web → Backend → Milvus）。
 
-```powershell
-Copy-Item .env.example .env
-```
-
-### 3. 启动后端
-
-先安装 Python 依赖：
+### 方式二：本地开发
 
 ```bash
+# 1. 环境准备
 pip install -r requirements.txt
-```
+cp .env.example .env
 
-启动 Milvus 及 API：
-
-```bash
+# 2. 启动后端（自动拉起 Milvus Docker）
 python main.py
+
+# 3. 启动前端（另开终端）
+cd web && npm install && npm run dev
 ```
 
-如果只启动 API：
+访问 `http://localhost:3000`。
+
+后端参数：
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--host` | `0.0.0.0` | 绑定地址 |
+| `--port` | `8008` | 端口 |
+| `--reload` | off | 开发热重载 |
+| `--skip-infra` | off | 跳过 Docker（Milvus 已在跑时用） |
+
+## 服务端口
+
+| 服务 | 端口 | 说明 |
+|---|---|---|
+| Nginx | 80 | 生产入口（仅 Docker 全栈模式） |
+| Web (Next.js) | 3000 | BFF 代理层 |
+| Backend (FastAPI) | 8008 | API 服务 |
+| Milvus | 19530 | 向量数据库 |
+| Attu | 8000 | Milvus 管理 UI（仅开发模式） |
+| MinIO Console | 9001 | 对象存储管理 |
+
+## 数据导入
+
+### 向量数据（知识库文档）
 
 ```bash
-python main.py --skip-infra
-```
-
-默认端口：
-
-- API: `http://localhost:8008`
-- Attu: `http://localhost:8000`
-- Milvus: `localhost:19530`
-
-健康检查：
-
-```bash
-curl http://localhost:8008/health
-```
-
-### 4. 启动前端
-
-开发模式：
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-生产模式：
-
-```bash
-cd web
-npm install
-npm run build
-npm run start
-```
-
-默认地址：
-
-- `http://localhost:3000`
-
-## 数据导入与检索
-
-导入整个目录：
-
-```bash
+# 批量导入目录下所有文件（会清空重建 collection）
 python -m script.ingest_all --dir ./data/raw/unstructured
-```
 
-导入单个文件：
-
-```bash
+# 单文件导入（追加，不清空）
 python -m script.ingest_file --file ./data/raw/unstructured/本科专业.md --category major
 ```
 
-检索验证：
+支持的文件格式：`.md` `.txt` `.doc` `.docx` `.pdf` `.xlsx`
+
+分类可选值：`school_info` `admissions` `major` `career` `campus`
+
+运行中也可通过 API 热灌库（无需重启）：
 
 ```bash
-python -m script.demo_vector_search --query "本科专业" --top-k 3
+curl -X POST -H "X-API-Key: $API_SHARED_KEY" \
+  -F "file=@data/raw/unstructured/new_doc.md" \
+  -F "category=admissions" \
+  http://localhost:8008/admin/ingest
 ```
 
-## 结构化 SQL 数据
-
-当前结构化录取数据改为手工维护流程：
-
-- 手工创建 `data/db/admissions.db`
-- 手工执行建表 SQL
-- 手工把 Excel / CSV 数据导入 SQLite
-- `src/config/table_registry.yaml` 只保留查询元数据，不再负责建表或导入
-- `src/knowledge/sql_queries.py` 保存手写 SQL 查询函数
-
-校验已注册表和查询键：
+### SQL 结构化数据（录取分数）
 
 ```bash
+# 建表 + 导入数据
+python sql/demo_admission_scores.py --reset
+
+# 校验表注册
 python -m src.knowledge.manage validate-sql
-```
 
-调试 `admission_scores` 查询：
-
-```bash
+# 查询测试
 python -m src.knowledge.manage query-admission-scores --province 安徽 --year 2024
 ```
 
-## 服务器部署
+## 环境变量
 
-适用于单机部署场景，默认后端 `8008`、前端 `3000`。
+完整列表见 [.env.example](.env.example)，关键变量：
 
-### 环境变量拆分
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `QWEN_API_KEY` | 是 | Qwen 模型密钥（启动时校验） |
+| `JINA_API_KEY` | 是 | Jina Reranker 密钥（启动时校验） |
+| `API_SHARED_KEY` | 推荐 | BFF → Backend 的共享密钥 |
+| `MILVUS_URI` | 否 | 默认 `http://localhost:19530` |
+| `AlayaData_URL` | 否 | Embedding 服务地址 |
+| `LANGFUSE_ENABLED` | 否 | 设为 `true` 开启 Langfuse 追踪 |
+| `CORS_ALLOWED_ORIGINS` | 否 | 空=禁用 CORS（BFF 架构下推荐） |
+| `LOG_LEVEL` | 否 | 默认 `INFO` |
 
-- `.env`（服务器上）包含私密变量：`API_SHARED_KEY`、`BACKEND_INTERNAL_URL`、`STREAM_MAX_DURATION_SECONDS`、`STREAM_IDLE_TIMEOUT_SECONDS`、各大模型 Key、Milvus/Langfuse 配置等；该文件只给后端 / Next.js 服务端读取。
-- `web/.env.local` 只保留 `NEXT_PUBLIC_*` 这类前端需要暴露的变量，部署脚本在构建前写入或由 CI 注入。
+## API 端点
 
-示例：
+| 端点 | 说明 |
+|---|---|
+| `GET /health` | 健康检查（无需鉴权） |
+| `GET /info` | 服务信息（无需鉴权） |
+| `GET /metrics` | Prometheus 指标（无需鉴权） |
+| `POST /threads` | 创建对话线程 |
+| `GET /threads/{id}` | 获取线程信息 |
+| `POST /threads/{id}/runs/stream` | 流式对话（SSE） |
+| `POST /api/chat/stream` | 兼容聊天流式接口 |
+| `GET /admin/collection/stats` | 向量库状态 |
+| `POST /admin/ingest` | 热灌库（上传文件） |
 
-```bash
-cp .env.example .env         # 服务器私密变量
-cp web/.env.example web/.env.local  # 如果需要前端自定义公开变量
-```
+除 `/health`、`/info`、`/metrics` 外，所有端点需 `X-API-Key` 请求头。
 
-### 1. 拉取代码并配置环境变量
+## 安全机制
 
-```bash
-git clone <your-repo-url>
-cd AlayaEnrollment
-cp .env.example .env
-```
+- **API Key 鉴权** — `API_SHARED_KEY` 保护所有业务端点
+- **CORS** — 默认禁用（BFF 架构不需要跨域）
+- **Device ID 校验** — 字符白名单 + per-device 滑动窗口限流
+- **Nginx 限流** — 流式端点 20 req/min per IP
+- **错误脱敏** — 内部异常不暴露给客户端
+- **输入校验** — Body 64KiB 上限 + metadata 4KiB 上限
+- **Prompt 防注入** — 所有 system prompt 含防注入指令
+- **安全响应头** — X-Frame-Options / X-Content-Type-Options / Referrer-Policy
 
-生产环境建议额外配置：
+## 可观测性
 
-```bash
-export RUNTIME_ROOT=/var/lib/alaya-enrollment/runtime
-```
+- **结构化日志** — JSON 格式 access log 输出到 stderr
+- **Prometheus 指标** — HTTP 请求、LLM 调用、向量检索、SQL 查询、Embedding 的耗时和成功率
+- **Langfuse** — 可选的 LLM 调用追踪（`LANGFUSE_ENABLED=true` 开启）
 
-- `RUNTIME_ROOT` 应指向仓库外的持久目录。
-- 运行时文件会落在 `$RUNTIME_ROOT/chat-api/` 下，包括 `checkpoints.sqlite`
-  和 `thread_registry.sqlite`。
-- 当前后端运行时模型仍然是单 worker；`RUNTIME_ROOT` 只解决持久化与重启
-  一致性，不会让多 worker 自动变安全。
+访问 `http://localhost:8008/metrics` 查看指标。
 
-### 2. 启动后端
-
-前台启动：
-
-```bash
-python main.py --host 127.0.0.1 --port 8008
-```
-
-后台启动：
-
-```bash
-export RUNTIME_ROOT="${RUNTIME_ROOT:-/var/lib/alaya-enrollment/runtime}"
-mkdir -p "$RUNTIME_ROOT"
-nohup python main.py --host 127.0.0.1 --port 8008 > "$RUNTIME_ROOT"/backend.log 2>&1 &
-```
-
-- 如果需要关闭自动拉起 Milvus，可提前在服务器上运行 `docker compose -f infra/docker/milvus-compose.yml up -d`，再在后端命令追加 `--skip-infra`。
-- `API_SHARED_KEY` 会被 FastAPI 中间件校验，但密钥只由 Next.js BFF 在服务端注入；浏览器和 Nginx 都不再直接携带该值。
-- `STREAM_MAX_DURATION_SECONDS` 和 `STREAM_IDLE_TIMEOUT_SECONDS` 会保护三个流式入口：`/api/chat/stream`、`/runs/stream`、`/threads/{id}/runs/stream`。
-- 生产环境不要把 `RUNTIME_ROOT` 指回仓库目录；否则部署或清理工作区时仍然可能误删运行时数据。
-- Nginx 需要对公网流式入口做基础 IP 限流，示例：
+## 项目结构
 
 ```
-limit_req_zone $binary_remote_addr zone=alaya_stream_per_ip:10m rate=20r/m;
-
-server {
-  limit_req_status 429;
-
-  location = /api/chat/stream {
-    limit_req zone=alaya_stream_per_ip burst=10 nodelay;
-    proxy_pass http://127.0.0.1:3000;
-    proxy_buffering off;
-    proxy_read_timeout 600s;
-  }
-}
+├── docker-compose.yml              # 全栈 Docker 编排（生产）
+├── main.py                         # 后端启动入口（开发）
+├── requirements.txt                # Python 依赖
+├── .env.example                    # 环境变量模板
+│
+├── src/
+│   ├── api/                        # FastAPI 应用 + 可观测性
+│   ├── graph/                      # LangGraph 对话编排
+│   │   ├── node/                   # 图节点（意图分类、生成、闲聊等）
+│   │   └── agentic_rag/            # RAG 子图（检索、重排、评估）
+│   ├── knowledge/                  # 知识层（Milvus、SQLite、Embedding）
+│   ├── runtime/                    # 运行时（线程管理、Checkpoint）
+│   └── config/                     # 配置文件
+│
+├── web/                            # Next.js 前端
+├── infra/
+│   ├── docker/                     # Dockerfile + Milvus 开发编排
+│   └── nginx/                      # Nginx 反向代理配置
+├── script/                         # 数据导入脚本
+├── sql/                            # SQL 建表 + 数据导入工具
+├── tests/                          # 测试套件
+└── data/                           # 数据目录（gitignored）
 ```
 
-### 3. 启动前端
+## 详细部署指南
 
-```bash
-cd web
-npm install
-npm run build
-export RUNTIME_ROOT="${RUNTIME_ROOT:-/var/lib/alaya-enrollment/runtime}"
-mkdir -p "$RUNTIME_ROOT"
-nohup npm run start -- --hostname 0.0.0.0 --port 3000 > "$RUNTIME_ROOT"/frontend.log 2>&1 &
-```
-
-### 4. 导入知识库
-
-```bash
-cd ..
-python -m script.ingest_all --dir ./data/raw/unstructured
-```
-
-### 5. 验证服务
-
-```bash
-curl http://127.0.0.1:8008/health
-curl http://127.0.0.1:3000
-python -m script.demo_vector_search --query "本科专业" --top-k 3
-```
-
-## API 保护与限流
-
-- 设置 `API_SHARED_KEY` 后，所有除 `/health`、`/info` 以外的 FastAPI 接口都需要 `X-Api-Key` 请求头；在当前单机部署中，这个头只由 Next.js BFF 在服务端注入。
-- `/threads/{id}/runs/stream` 启用 per-thread single-flight；同一线程已有流式运行时，后续请求会返回 `409 THREAD_BUSY`，避免线程状态并发写乱。
-- `STREAM_MAX_DURATION_SECONDS` 和 `STREAM_IDLE_TIMEOUT_SECONDS` 会限制 `/api/chat/stream`、`/runs/stream`、`/threads/{id}/runs/stream` 的总时长和空闲时长，防止请求长期挂死占住资源。
-- 公网入口的基础 IP 限流由 Nginx `limit_req` 实现，默认只对上述三个流式路径生效，超限返回 `429`。
-- 当前 single-flight 为进程内实现，适用于单机单 worker；后续如果部署多个 worker，需要改成 Redis 或网关层的共享租约/配额模型。
-
-## Langfuse
-
-- 只有在 `LANGFUSE_ENABLED=true` 时，后端才会初始化 Langfuse 并上报追踪数据。
-- 即使配置了 `LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`、`LANGFUSE_HOST`，只要 `LANGFUSE_ENABLED` 未开启或为 `false`，就不会上报。
-- 当前运行时会在请求结束时显式调用 Langfuse client 的 `flush()`，并在服务关闭时调用 `shutdown()`，避免对话 trace 长时间留在本地队列里不出现在 Langfuse UI。
-
-## 推荐顺序
-
-```bash
-cp .env.example .env
-python main.py
-python -m script.ingest_all --dir ./data/raw/unstructured
-python -m script.demo_vector_search --query "本科专业" --top-k 3
-```
+见 [DEPLOY.md](DEPLOY.md)。
