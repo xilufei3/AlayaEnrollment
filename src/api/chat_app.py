@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import re
+import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Callable
 from uuid import uuid4
@@ -10,7 +14,25 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+_logger = logging.getLogger("alaya.api")
+
+_MAX_METADATA_BYTES = 4096
+_MAX_REQUEST_BODY_BYTES = 64 * 1024  # 64 KiB
+
+
+def _check_metadata_size(v: dict[str, Any] | None) -> dict[str, Any] | None:
+    if v is None:
+        return v
+    raw = json.dumps(v, default=str)
+    if len(raw) > _MAX_METADATA_BYTES:
+        raise ValueError(f"metadata too large (max {_MAX_METADATA_BYTES // 1024} KiB)")
+    return v
+
+
+def _metadata_validator(cls: Any, v: dict[str, Any] | None) -> dict[str, Any] | None:
+    return _check_metadata_size(v)
 
 try:
     from packages.vector_store.errors import VectorStoreError
@@ -43,36 +65,26 @@ def _read_positive_float_env(name: str, default: float) -> float:
     return value
 
 
-def _cors_json_response(
-    request: Request,
-    *,
-    status_code: int,
-    content: Any,
-) -> JSONResponse:
-    response = JSONResponse(status_code=status_code, content=content)
-    origin = request.headers.get("origin", "").strip()
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Vary"] = "Origin"
-    return response
-
-
 class ChatStreamRequest(BaseModel):
-    session_id: str = Field(..., min_length=8, max_length=128)
+    session_id: str = Field(..., min_length=8, max_length=128, pattern=r"^[a-zA-Z0-9_\-]+$")
     message: str = Field(..., min_length=1, max_length=4000)
-    trace_id: str | None = Field(default=None, max_length=128)
+    trace_id: str | None = Field(default=None, max_length=128, pattern=r"^[a-zA-Z0-9_\-]*$")
 
 
 class ThreadCreateRequest(BaseModel):
-    thread_id: str | None = None
+    thread_id: str | None = Field(default=None, max_length=128, pattern=r"^[a-zA-Z0-9_\-]+$")
     metadata: dict[str, Any] | None = None
-    if_exists: str | None = None
+    if_exists: str | None = Field(default=None, max_length=32)
+
+    _validate_metadata = field_validator("metadata")(_metadata_validator)
 
 
 class ThreadSearchRequest(BaseModel):
     metadata: dict[str, Any] | None = None
     limit: int = 10
     offset: int = 0
+
+    _validate_metadata = field_validator("metadata")(_metadata_validator)
 
 
 class ThreadHistoryRequest(BaseModel):
@@ -97,6 +109,8 @@ class RunStreamRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
     model_config = {"populate_by_name": True}
+
+    _validate_metadata = field_validator("metadata")(_metadata_validator)
 
 
 def _repo_root() -> Path:
@@ -132,6 +146,13 @@ def _timeout_error_payload(
     return payload
 
 
+_SAFE_MESSAGES: dict[str, str] = {
+    "INTERNAL_ERROR": "服务内部异常，请稍后重试。",
+    "MODEL_UNAVAILABLE": "AI 模型暂时不可用，请稍后重试。",
+    "VECTOR_STORE_ERROR": "数据检索异常，请稍后重试。",
+}
+
+
 def _error_payload(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, ModelRequestTimeoutError):
         return _timeout_error_payload(
@@ -148,9 +169,11 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
             message="Upstream request timed out",
         )
 
+    code = _error_code(exc)
+    _logger.exception("Request error [%s]", code)
     return {
-        "code": _error_code(exc),
-        "message": str(exc),
+        "code": code,
+        "message": _SAFE_MESSAGES.get(code, _SAFE_MESSAGES["INTERNAL_ERROR"]),
     }
 
 
@@ -169,6 +192,27 @@ class _ThreadRunLeaseRegistry:
     async def release(self, thread_id: str) -> None:
         async with self._lock:
             self._active_thread_ids.discard(thread_id)
+
+
+class _DeviceRateLimiter:
+    """In-memory sliding-window counter per device ID."""
+
+    def __init__(self, max_requests: int, window_seconds: float) -> None:
+        self._max_requests = max(1, max_requests)
+        self._window_seconds = max(1.0, window_seconds)
+        self._timestamps: dict[str, list[float]] = defaultdict(list)
+        self._lock = asyncio.Lock()
+
+    async def check(self, device_id: str) -> bool:
+        now = time.monotonic()
+        cutoff = now - self._window_seconds
+        async with self._lock:
+            ts_list = self._timestamps[device_id]
+            self._timestamps[device_id] = [t for t in ts_list if t > cutoff]
+            if len(self._timestamps[device_id]) >= self._max_requests:
+                return False
+            self._timestamps[device_id].append(now)
+            return True
 
 
 async def _close_async_iterator(iterator: Any) -> None:
@@ -226,11 +270,17 @@ async def _guard_sse_events(
         await _close_async_iterator(iterator)
 
 
+_DEVICE_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
+_DEVICE_ID_MAX_LEN = 128
+
+
 def _get_device_id(request: Request) -> str:
     raw = request.headers.get("x-device-id", "").strip()
-    if raw:
-        return raw
-    raise HTTPException(status_code=400, detail="X-Device-Id header is required")
+    if not raw:
+        raise HTTPException(status_code=400, detail="X-Device-Id header is required")
+    if len(raw) > _DEVICE_ID_MAX_LEN or not _DEVICE_ID_RE.match(raw):
+        raise HTTPException(status_code=400, detail="Invalid device ID")
+    return raw
 
 
 def _thread_metadata_for_request(
@@ -289,13 +339,18 @@ def _assert_thread_create_allowed(
 
 def create_app() -> FastAPI:
     app = FastAPI(title="AlayaAgent Chat API", version="0.2.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+
+    cors_origins_raw = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+    if cors_origins_raw:
+        origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
+        if origins:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=origins,
+                allow_credentials=False,
+                allow_methods=["GET", "POST", "OPTIONS"],
+                allow_headers=["Content-Type", "X-Device-Id"],
+            )
 
     repo_root = _repo_root()
     env_file = repo_root / ".env"
@@ -317,6 +372,10 @@ def create_app() -> FastAPI:
         "STREAM_MAX_DURATION_SECONDS",
         120.0,
     )
+    app.state.device_rate_limiter = _DeviceRateLimiter(
+        max_requests=int(os.getenv("DEVICE_RATE_LIMIT_MAX", "30")),
+        window_seconds=float(os.getenv("DEVICE_RATE_LIMIT_WINDOW", "60")),
+    )
 
     def _runtime_or_503() -> AdmissionGraphRuntime:
         if app.state.startup_error is not None:
@@ -337,6 +396,20 @@ def create_app() -> FastAPI:
         await runtime.shutdown()
 
     @app.middleware("http")
+    async def limit_request_body(request: Request, call_next):
+        cl = request.headers.get("content-length")
+        if cl:
+            try:
+                if int(cl) > _MAX_REQUEST_BODY_BYTES:
+                    return JSONResponse(
+                        status_code=413,
+                        content={"detail": "Request body too large"},
+                    )
+            except ValueError:
+                pass
+        return await call_next(request)
+
+    @app.middleware("http")
     async def require_shared_key(request: Request, call_next):
         shared_key = app.state.api_shared_key
         if not shared_key:
@@ -345,16 +418,29 @@ def create_app() -> FastAPI:
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        if request.url.path in {"/health", "/info"}:
+        if request.url.path in {"/health", "/info", "/metrics"}:
             return await call_next(request)
 
         if request.headers.get("x-api-key", "") != shared_key:
-            return _cors_json_response(
-                request,
+            return JSONResponse(
                 status_code=401,
                 content={"detail": "Unauthorized"},
             )
 
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def enforce_device_rate_limit(request: Request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        if request.url.path in {"/health", "/info", "/metrics"}:
+            return await call_next(request)
+        device_id = request.headers.get("x-device-id", "").strip()
+        if device_id and not await app.state.device_rate_limiter.check(device_id):
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests"},
+            )
         return await call_next(request)
 
     @app.get("/health")
@@ -377,6 +463,14 @@ def create_app() -> FastAPI:
             "assistant_id": "agent",
             "api_key_required": bool(app.state.api_shared_key),
         }
+
+    @app.exception_handler(Exception)
+    async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        _logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"},
+        )
 
     @app.post("/threads")
     def create_thread(req: ThreadCreateRequest, request: Request) -> dict[str, Any]:
@@ -454,8 +548,7 @@ def create_app() -> FastAPI:
         await asyncio.to_thread(_get_owned_thread_state, rt, request, thread_id)
         lease_registry: _ThreadRunLeaseRegistry = app.state.thread_run_leases
         if not await lease_registry.try_acquire(thread_id):
-            return _cors_json_response(
-                request,
+            return JSONResponse(
                 status_code=409,
                 content={
                     "code": "THREAD_BUSY",
@@ -633,7 +726,7 @@ def create_app() -> FastAPI:
                         (
                             {
                                 "code": "RUNTIME_NOT_READY",
-                                "message": str(exc),
+                                "message": "服务正在启动，请稍后重试。",
                                 "session_id": session_id,
                             }
                             if isinstance(exc, RuntimeError)
@@ -654,6 +747,11 @@ def create_app() -> FastAPI:
             "X-Accel-Buffering": "no",
         }
         return StreamingResponse(event_iter(), media_type="text/event-stream", headers=headers)
+
+    # Observability must be attached last — Starlette runs last-registered
+    # middleware first, so access log wraps everything.
+    from .observability import attach_observability
+    attach_observability(app)
 
     return app
 
