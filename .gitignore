@@ -45,4 +45,3 @@ coverage/
 
 # Package manager noise
 **/package-lock.json
-tests/*
