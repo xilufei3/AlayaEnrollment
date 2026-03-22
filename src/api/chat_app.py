@@ -17,6 +17,7 @@ try:
 except ModuleNotFoundError:
     class VectorStoreError(Exception):
         """Compatibility fallback when the legacy packages module is absent."""
+from ..graph.llm import ModelRequestTimeoutError
 from ..runtime.graph_runtime import AdmissionGraphRuntime, RuntimeConfig
 
 
@@ -103,15 +104,54 @@ def _repo_root() -> Path:
 
 
 def _error_code(exc: Exception) -> str:
+    if isinstance(exc, ModelRequestTimeoutError):
+        return "REQUEST_TIMEOUT"
     if isinstance(exc, VectorStoreError):
         return "VECTOR_STORE_ERROR"
     msg = str(exc).lower()
     name = type(exc).__name__.lower()
     if "timeout" in msg or "timeout" in name:
-        return "UPSTREAM_TIMEOUT"
+        return "REQUEST_TIMEOUT"
     if "model" in msg or "api key" in msg:
         return "MODEL_UNAVAILABLE"
     return "INTERNAL_ERROR"
+
+
+def _timeout_error_payload(
+    *,
+    timeout_kind: str,
+    message: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "code": "REQUEST_TIMEOUT",
+        "timeout_kind": timeout_kind,
+        "message": message,
+    }
+    payload.update(extra)
+    return payload
+
+
+def _error_payload(exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, ModelRequestTimeoutError):
+        return _timeout_error_payload(
+            timeout_kind=exc.timeout_kind,
+            message=str(exc),
+            model_kind=exc.model_kind,
+            provider=exc.provider,
+            timeout_seconds=exc.timeout_seconds,
+        )
+
+    if _error_code(exc) == "REQUEST_TIMEOUT":
+        return _timeout_error_payload(
+            timeout_kind="upstream_timeout",
+            message="Upstream request timed out",
+        )
+
+    return {
+        "code": _error_code(exc),
+        "message": str(exc),
+    }
 
 
 class _ThreadRunLeaseRegistry:
@@ -233,6 +273,20 @@ def _get_owned_thread_state(
     return state
 
 
+def _assert_thread_create_allowed(
+    rt: AdmissionGraphRuntime,
+    request: Request,
+    thread_id: str,
+) -> None:
+    state = rt.get_thread_state(thread_id=thread_id)
+    if not _thread_exists(state):
+        return
+
+    metadata = _thread_metadata(state)
+    if metadata.get("device_id") != _get_device_id(request):
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="AlayaAgent Chat API", version="0.2.0")
     app.add_middleware(
@@ -266,7 +320,7 @@ def create_app() -> FastAPI:
 
     def _runtime_or_503() -> AdmissionGraphRuntime:
         if app.state.startup_error is not None:
-            raise HTTPException(status_code=503, detail=str(app.state.startup_error))
+            raise HTTPException(status_code=503, detail="Service unavailable")
         return app.state.runtime
 
     @app.on_event("startup")
@@ -304,11 +358,15 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     @app.get("/health")
-    def health() -> dict[str, Any]:
-        out: dict[str, Any] = {"ok": True, "runtime_ready": app.state.startup_error is None}
-        if app.state.startup_error is not None:
-            out["startup_error"] = str(app.state.startup_error)
-        return out
+    def health() -> JSONResponse:
+        runtime_ready = app.state.startup_error is None
+        return JSONResponse(
+            status_code=200 if runtime_ready else 503,
+            content={
+                "ok": runtime_ready,
+                "runtime_ready": runtime_ready,
+            },
+        )
 
     @app.get("/info")
     def info() -> dict[str, Any]:
@@ -323,8 +381,11 @@ def create_app() -> FastAPI:
     @app.post("/threads")
     def create_thread(req: ThreadCreateRequest, request: Request) -> dict[str, Any]:
         rt = _runtime_or_503()
+        thread_id = (req.thread_id or "").strip() or None
+        if thread_id is not None:
+            _assert_thread_create_allowed(rt, request, thread_id)
         metadata = _thread_metadata_for_request(request, "agent", req.metadata)
-        return rt.create_thread(thread_id=req.thread_id, metadata=metadata)
+        return rt.create_thread(thread_id=thread_id, metadata=metadata)
 
     @app.get("/threads/{thread_id}")
     def get_thread(thread_id: str, request: Request) -> dict[str, Any]:
@@ -419,30 +480,27 @@ def create_app() -> FastAPI:
                     idle_events_factory=lambda: [
                         (
                             "error",
-                            {
-                                "code": "STREAM_IDLE_TIMEOUT",
-                                "message": "Stream closed after "
+                            _timeout_error_payload(
+                                timeout_kind="stream_idle_timeout",
+                                message="Stream closed after "
                                 f"{_format_seconds(idle_timeout_seconds)}s without events",
-                            },
+                            ),
                         )
                     ],
                     max_duration_events_factory=lambda: [
                         (
                             "error",
-                            {
-                                "code": "STREAM_MAX_DURATION_EXCEEDED",
-                                "message": "Stream exceeded max duration of "
+                            _timeout_error_payload(
+                                timeout_kind="stream_max_duration_timeout",
+                                message="Stream exceeded max duration of "
                                 f"{_format_seconds(max_duration_seconds)}s",
-                            },
+                            ),
                         )
                     ],
                     exception_events_factory=lambda exc: [
                         (
                             "error",
-                            {
-                                "code": _error_code(exc),
-                                "message": str(exc),
-                            },
+                            _error_payload(exc),
                         )
                     ],
                 ):
@@ -486,30 +544,27 @@ def create_app() -> FastAPI:
                 idle_events_factory=lambda: [
                     (
                         "error",
-                        {
-                            "code": "STREAM_IDLE_TIMEOUT",
-                            "message": "Stream closed after "
+                        _timeout_error_payload(
+                            timeout_kind="stream_idle_timeout",
+                            message="Stream closed after "
                             f"{_format_seconds(idle_timeout_seconds)}s without events",
-                        },
+                        ),
                     )
                 ],
                 max_duration_events_factory=lambda: [
                     (
                         "error",
-                        {
-                            "code": "STREAM_MAX_DURATION_EXCEEDED",
-                            "message": "Stream exceeded max duration of "
+                        _timeout_error_payload(
+                            timeout_kind="stream_max_duration_timeout",
+                            message="Stream exceeded max duration of "
                             f"{_format_seconds(max_duration_seconds)}s",
-                        },
+                        ),
                     )
                 ],
                 exception_events_factory=lambda exc: [
                     (
                         "error",
-                        {
-                            "code": _error_code(exc),
-                            "message": str(exc),
-                        },
+                        _error_payload(exc),
                     )
                 ],
             ):
@@ -551,37 +606,42 @@ def create_app() -> FastAPI:
                 idle_events_factory=lambda: [
                     (
                         "error",
-                        {
-                            "code": "STREAM_IDLE_TIMEOUT",
-                            "message": "Stream closed after "
+                        _timeout_error_payload(
+                            timeout_kind="stream_idle_timeout",
+                            message="Stream closed after "
                             f"{_format_seconds(idle_timeout_seconds)}s without events",
-                            "session_id": session_id,
-                        },
+                            session_id=session_id,
+                        ),
                     ),
                     ("done", {"session_id": session_id}),
                 ],
                 max_duration_events_factory=lambda: [
                     (
                         "error",
-                        {
-                            "code": "STREAM_MAX_DURATION_EXCEEDED",
-                            "message": "Stream exceeded max duration of "
+                        _timeout_error_payload(
+                            timeout_kind="stream_max_duration_timeout",
+                            message="Stream exceeded max duration of "
                             f"{_format_seconds(max_duration_seconds)}s",
-                            "session_id": session_id,
-                        },
+                            session_id=session_id,
+                        ),
                     ),
                     ("done", {"session_id": session_id}),
                 ],
                 exception_events_factory=lambda exc: [
                     (
                         "error",
-                        {
-                            "code": "RUNTIME_NOT_READY"
+                        (
+                            {
+                                "code": "RUNTIME_NOT_READY",
+                                "message": str(exc),
+                                "session_id": session_id,
+                            }
                             if isinstance(exc, RuntimeError)
-                            else _error_code(exc),
-                            "message": str(exc),
-                            "session_id": session_id,
-                        },
+                            else {
+                                **_error_payload(exc),
+                                "session_id": session_id,
+                            }
+                        ),
                     ),
                     ("done", {"session_id": session_id}),
                 ],
