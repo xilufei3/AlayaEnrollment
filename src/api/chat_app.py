@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Callable
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -463,6 +463,78 @@ def create_app() -> FastAPI:
             "assistant_id": "agent",
             "api_key_required": bool(app.state.api_shared_key),
         }
+
+    # ── Admin: knowledge base hot reload ──────────────────────
+
+    _ALLOWED_INGEST_EXTENSIONS = {".md", ".txt", ".doc", ".docx", ".pdf", ".xlsx"}
+
+    @app.get("/admin/collection/stats")
+    def collection_stats() -> dict[str, Any]:
+        """Return vector collection row count (no restart needed)."""
+        _runtime_or_503()
+        from ..knowledge.vector_manager import VectorManager
+        return VectorManager().collection_stats()
+
+    @app.post("/admin/ingest")
+    async def admin_ingest(
+        file: UploadFile,
+        category: str | None = None,
+    ) -> dict[str, Any]:
+        """Ingest a file into the vector store without restarting the service.
+
+        Requires X-API-Key header (same as all other endpoints).
+        Accepts multipart/form-data with a single file upload.
+        """
+        _runtime_or_503()
+
+        # Validate file extension
+        import tempfile
+        suffix = Path(file.filename or "").suffix.lower()
+        if suffix not in _ALLOWED_INGEST_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type '{suffix}'. Allowed: {', '.join(sorted(_ALLOWED_INGEST_EXTENSIONS))}",
+            )
+
+        # Save to temp file, run ETL → embed → insert (blocking), then clean up
+        tmp_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=suffix, prefix="ingest_",
+            ) as tmp:
+                content = await file.read()
+                tmp.write(content)
+                tmp_path = tmp.name
+
+            from ..knowledge.manage import ingest_vector
+            from ..knowledge.vector_manager import VectorManager
+
+            inserted = await asyncio.to_thread(
+                lambda: _run_ingest(tmp_path, category),
+            )
+            stats = VectorManager().collection_stats()
+            _logger.info("Admin ingest: file=%s category=%s inserted=%d", file.filename, category, inserted)
+            return {"inserted": inserted, "collection": stats}
+        except HTTPException:
+            raise
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            _logger.exception("Admin ingest failed: %s", exc)
+            raise HTTPException(status_code=500, detail="Ingest failed") from exc
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+    def _run_ingest(file_path: str, category: str | None) -> int:
+        """Synchronous wrapper — called via asyncio.to_thread."""
+        from ..knowledge.manage import ingest_vector
+        return ingest_vector(file_path, category)
+
+    # ── End admin endpoints ───────────────────────────────────
 
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:

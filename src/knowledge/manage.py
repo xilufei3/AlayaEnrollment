@@ -109,7 +109,8 @@ def ingest_vector(
     chunk_overlap: int = config.ingest.vector.chunk_overlap,
     *,
     flush: bool = True,
-) -> None:
+) -> int:
+    """Ingest a file into the vector store. Returns number of chunks inserted."""
     from .alaya_etl import AlayaETL
     from .vector_manager import VectorManager
 
@@ -131,6 +132,7 @@ def ingest_vector(
     vm.ensure_collection()
     inserted = vm.insert_chunks(chunks, flush=flush)
     logger.info("vector ingest finished: %d chunks", inserted)
+    return inserted
 
 
 def validate_sql_registry() -> dict[str, dict]:
