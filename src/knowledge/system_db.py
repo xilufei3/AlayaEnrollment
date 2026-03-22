@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.pool import StaticPool
 
 from ..config.settings import config
@@ -55,6 +55,13 @@ class SystemDB:
             poolclass=StaticPool,
             pool_pre_ping=True,
         )
+
+        @event.listens_for(self._engine, "connect")
+        def _set_sqlite_wal(dbapi_conn, connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.close()
+
         self._migrate()
         logger.info("SystemDB 初始化完成")
 

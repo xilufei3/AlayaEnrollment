@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections import OrderedDict
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,6 +13,60 @@ from typing import Any, AsyncIterator
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage
+
+
+_DEFAULT_THREAD_CACHE_MAX = 2000
+_DEFAULT_THREAD_CACHE_TTL = 7200  # 2 hours
+
+
+class _LRUThreadCache:
+    """Bounded LRU cache with TTL for in-memory thread objects.
+
+    Actual thread data lives in SQLite (ThreadRegistry + checkpointer).
+    This cache only holds hot thread objects to avoid repeated DB reads.
+    Evicted threads are NOT deleted — they reload from DB on next access.
+    """
+
+    def __init__(self, maxsize: int = _DEFAULT_THREAD_CACHE_MAX, ttl: float = _DEFAULT_THREAD_CACHE_TTL) -> None:
+        self._maxsize = max(1, maxsize)
+        self._ttl = max(0.0, ttl)
+        self._data: OrderedDict[str, tuple[dict[str, Any], float]] = OrderedDict()
+
+    def get(self, key: str) -> dict[str, Any] | None:
+        entry = self._data.get(key)
+        if entry is None:
+            return None
+        value, ts = entry
+        if self._ttl and (time.monotonic() - ts) > self._ttl:
+            del self._data[key]
+            return None
+        self._data.move_to_end(key)
+        return value
+
+    def put(self, key: str, value: dict[str, Any]) -> None:
+        if key in self._data:
+            self._data.move_to_end(key)
+            self._data[key] = (value, time.monotonic())
+        else:
+            if len(self._data) >= self._maxsize:
+                self._data.popitem(last=False)  # evict oldest
+            self._data[key] = (value, time.monotonic())
+
+    def values(self) -> list[dict[str, Any]]:
+        now = time.monotonic()
+        result: list[dict[str, Any]] = []
+        expired: list[str] = []
+        for key, (value, ts) in self._data.items():
+            if self._ttl and (now - ts) > self._ttl:
+                expired.append(key)
+            else:
+                result.append(value)
+        for key in expired:
+            del self._data[key]
+        return result
+
+    def __len__(self) -> int:
+        return len(self._data)
 
 from ..knowledge import SQLManager, SystemDB
 from ..knowledge.vector_manager import VectorManager
@@ -215,7 +270,10 @@ async def _load_sqlite_checkpointer(db_path: Path) -> tuple[Any, Any | None]:
     aenter = getattr(cm_or_saver, "__aenter__", None)
     if callable(aenter):
         saver = await aenter()
+        await saver.conn.execute("PRAGMA journal_mode=WAL")
         return saver, cm_or_saver
+    if hasattr(cm_or_saver, "conn"):
+        await cm_or_saver.conn.execute("PRAGMA journal_mode=WAL")
     return cm_or_saver, None
 
 
@@ -239,7 +297,10 @@ class AdmissionGraphRuntime:
         self._thread_registry: ThreadRegistry | None = None
         self._graph: Any | None = None
         self.runtime_root: Path | None = None
-        self._threads: dict[str, dict[str, Any]] = {}
+        self._threads = _LRUThreadCache(
+            maxsize=int(os.getenv("THREAD_CACHE_MAX", str(_DEFAULT_THREAD_CACHE_MAX))),
+            ttl=float(os.getenv("THREAD_CACHE_TTL", str(_DEFAULT_THREAD_CACHE_TTL))),
+        )
         self._langfuse_public_key: str | None = None
 
     @staticmethod
@@ -381,7 +442,7 @@ class AdmissionGraphRuntime:
             "values": {},
             "interrupts": {},
         }
-        self._threads[tid] = thread
+        self._threads.put(tid, thread)
         if self._thread_registry is not None:
             self._thread_registry.create_or_update(
                 thread_id=tid,
@@ -421,7 +482,7 @@ class AdmissionGraphRuntime:
                 })
             return result
 
-        items = list(self._threads.values())
+        items = self._threads.values()
         if metadata:
 
             def _match(item: dict[str, Any]) -> bool:
