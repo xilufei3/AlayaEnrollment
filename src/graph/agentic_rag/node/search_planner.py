@@ -129,7 +129,11 @@ async def _llm_plan(
     )
     content = getattr(response, "content", response)
     if isinstance(content, str):
-        data = json.loads(content)
+        try:
+            data = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("SearchPlanner: LLM returned invalid JSON, using fallback. content=%s", content[:200])
+            data = {}
     else:
         data = content
 

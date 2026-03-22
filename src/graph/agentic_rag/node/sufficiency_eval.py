@@ -64,11 +64,11 @@ class SufficiencyEvaluator:
         except ModelRequestTimeoutError:
             raise
         except Exception as exc:
-            logger.warning(f"SufficiencyEval LLM failed, fallback to sufficient. {exc}")
+            logger.warning(f"SufficiencyEval LLM failed, fallback to insufficient_docs. {exc}")
             return {
-                "eval_result": "sufficient",
+                "eval_result": "insufficient_docs",
                 "missing_slots": [],
-                "eval_reason": "LLM eval failed, fallback",
+                "eval_reason": "LLM eval failed, fallback to retry",
             }
 
     async def _llm_evaluate(
@@ -91,7 +91,15 @@ class SufficiencyEvaluator:
         )
         content = getattr(response, "content", response)
         if isinstance(content, str):
-            data = json.loads(content)
+            try:
+                data = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("SufficiencyEval: LLM returned invalid JSON, fallback insufficient_docs. content=%s", content[:200])
+                return {
+                    "eval_result": "insufficient_docs",
+                    "missing_slots": [],
+                    "eval_reason": "LLM returned invalid JSON",
+                }
         else:
             data = content
 
