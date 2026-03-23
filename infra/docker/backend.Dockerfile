@@ -10,6 +10,10 @@ RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r req
 COPY src/ src/
 COPY main.py .
 
+# Copy data-ingestion scripts (used via `docker compose exec`)
+COPY script/ script/
+COPY sql/ sql/
+
 # Runtime directory for checkpoints / thread registry
 RUN mkdir -p /app/.runtime
 
