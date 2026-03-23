@@ -34,8 +34,8 @@ export function ThreadHeader({
           >
             <div className="mx-auto w-full max-w-[50.4rem]">
               <div className="surface-glass relative overflow-hidden rounded-[1.8rem] border border-white/75 px-[1.125rem] py-[0.95rem] shadow-[0_22px_50px_rgba(24,72,71,0.1)] sm:px-[1.35rem] sm:py-4">
-                <div className="pointer-events-none absolute -right-12 top-0 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(29,158,117,0.16),transparent_68%)]" />
-                <div className="pointer-events-none absolute bottom-0 left-8 h-[5.5rem] w-[5.5rem] rounded-full bg-[radial-gradient(circle,rgba(211,154,44,0.12),transparent_72%)]" />
+                <div className="pointer-events-none absolute -right-12 top-0 h-32 w-32 rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--primary)_16%,transparent),transparent_68%)]" />
+                <div className="pointer-events-none absolute bottom-0 left-8 h-[5.5rem] w-[5.5rem] rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--accent-gold)_12%,transparent),transparent_72%)]" />
 
                 <div className="relative mx-auto w-full max-w-[34rem] text-center">
                   <div className="space-y-[0.6rem]">
@@ -43,7 +43,7 @@ export function ThreadHeader({
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center">
                         <SustechMark className="h-[3.75rem] w-[3.75rem]" />
                       </div>
-                      <div className="inline-flex items-center rounded-full border border-[#1D9E75]/12 bg-[#1D9E75]/8 px-3 py-1 text-[10px] font-semibold tracking-[0.18em] text-[#1D9E75]">
+                      <div className="inline-flex items-center rounded-full border border-primary/12 bg-primary/8 px-3 py-1 text-[10px] font-semibold tracking-[0.18em] text-primary">
                         SUSTech Admissions
                       </div>
                     </div>

@@ -89,7 +89,7 @@ export function HumanMessage({
             onSubmit={handleSubmitEdit}
           />
         ) : (
-          <div className="rounded-[1.55rem] rounded-br-md border border-[#1D9E75]/18 bg-[linear-gradient(135deg,rgba(35,181,134,0.18)_0%,rgba(29,158,117,0.14)_55%,rgba(20,122,91,0.18)_100%)] px-4 py-3 text-foreground shadow-[0_16px_32px_rgba(29,158,117,0.12)]">
+          <div className="bg-human-message rounded-[1.55rem] rounded-br-md border border-primary/18 px-4 py-3 text-foreground shadow-[0_16px_32px_color-mix(in_srgb,var(--primary)_12%,transparent)]">
             <p className="whitespace-pre-wrap text-[15px] leading-7">
               {contentString}
             </p>

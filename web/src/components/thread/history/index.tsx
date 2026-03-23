@@ -86,7 +86,7 @@ function ThreadList({
 function ThreadHistoryLoading() {
   return (
     <div className="h-full flex w-full flex-col items-start justify-start gap-2 overflow-y-scroll pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/20 [&::-webkit-scrollbar-track]:bg-transparent">
-      {Array.from({ length: 30 }).map((_, i) => (
+      {Array.from({ length: 8 }).map((_, i) => (
         <Skeleton
           key={`skeleton-${i}`}
           className="h-[4.5rem] w-full rounded-[1.4rem] bg-white/60"

@@ -196,7 +196,7 @@ function LandingHero(props: { onPromptSelect: (question: string) => void }) {
                 boxShadow: theme.shadow,
               }}
               onClick={() => props.onPromptSelect(prompt.question)}
-              className="group relative h-full overflow-hidden rounded-[1.25rem] border p-[0.9rem] text-left transition-all duration-300 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#1D9E75]/15 sm:p-4"
+              className="group relative h-full overflow-hidden rounded-[1.25rem] border p-[0.9rem] text-left transition-all duration-300 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/15 sm:p-4"
               style={{
                 background: theme.background,
                 borderColor: theme.borderColor,
@@ -564,16 +564,16 @@ export function Thread() {
           animate={{ left: composerInsetLeft }}
           transition={historyPanelTransition}
         >
-          <div className="bg-gradient-to-t from-[#f7f2e8] via-[#faf7f0]/96 to-transparent px-4 pb-4 pt-6 sm:px-6 lg:px-8">
+          <div className="bg-gradient-to-t from-bg-warm via-bg-warm-light/96 to-transparent px-4 pb-4 pt-6 sm:px-6 lg:px-8">
             <div className="relative mx-auto w-full max-w-[50.4rem]">
               <div ref={composerDockRef} className="pointer-events-auto">
                 {!chatStarted && (
                   <div className="mb-3.5 flex items-center gap-3.5 px-2">
-                    <div className="h-px flex-1 bg-gradient-to-r from-transparent via-[#1D9E75]/28 to-[#1D9E75]/6" />
+                    <div className="h-px flex-1 bg-gradient-to-r from-transparent via-primary/28 to-primary/6" />
                     <span className="text-[13.5px] font-medium text-muted-foreground">
                       或直接输入你的问题
                     </span>
-                    <div className="h-px flex-1 bg-gradient-to-l from-transparent via-[#1D9E75]/28 to-[#1D9E75]/6" />
+                    <div className="h-px flex-1 bg-gradient-to-l from-transparent via-primary/28 to-primary/6" />
                   </div>
                 )}
 
@@ -581,15 +581,15 @@ export function Thread() {
                   className="surface-glass relative overflow-hidden rounded-[1.8rem] border transition-all duration-300"
                   style={{
                     borderColor: composerFocused
-                      ? "rgba(29, 158, 117, 0.36)"
+                      ? "color-mix(in srgb, var(--primary) 36%, transparent)"
                       : "rgba(255, 255, 255, 0.82)",
                     boxShadow: composerFocused
-                      ? "0 0 0 4px rgba(29, 158, 117, 0.11), 0 28px 60px rgba(29, 158, 117, 0.16)"
+                      ? "0 0 0 4px color-mix(in srgb, var(--primary) 11%, transparent), 0 28px 60px color-mix(in srgb, var(--primary) 16%, transparent)"
                       : "0 24px 60px rgba(24, 72, 71, 0.12)",
                   }}
                 >
-                  <div className="pointer-events-none absolute -right-10 top-0 h-[6.25rem] w-[6.25rem] rounded-full bg-[radial-gradient(circle,rgba(29,158,117,0.15),transparent_72%)]" />
-                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#C9A35D]/75 to-transparent" />
+                  <div className="pointer-events-none absolute -right-10 top-0 h-[6.25rem] w-[6.25rem] rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--primary)_15%,transparent),transparent_72%)]" />
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent-gold/75 to-transparent" />
                   <form onSubmit={handleSubmit} className="grid">
                     <div className="px-[1.125rem] pt-[1.125rem] sm:px-5 sm:pt-5">
                       <textarea
@@ -616,10 +616,10 @@ export function Thread() {
                       />
                     </div>
 
-                    <div className="flex flex-col gap-3.5 border-t border-[#1D9E75]/10 px-[1.125rem] py-[0.875rem] sm:flex-row sm:items-end sm:justify-between sm:px-5">
+                    <div className="flex flex-col gap-3.5 border-t border-primary/10 px-[1.125rem] py-[0.875rem] sm:flex-row sm:items-end sm:justify-between sm:px-5">
                       <div className="space-y-1.5">
                         <div className="flex items-start gap-2 text-[13px] leading-[1.35rem] text-muted-foreground">
-                          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-[#C9A35D]" />
+                          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-accent-gold" />
                           <p>{BRAND_COPY.disclaimer}</p>
                         </div>
                       </div>
@@ -629,7 +629,7 @@ export function Thread() {
                           <Button
                             key="stop"
                             variant="outline"
-                            className="h-10 rounded-full border-[#1D9E75]/18 bg-white/80 px-[1.375rem] text-foreground shadow-[0_12px_24px_rgba(24,72,71,0.08)]"
+                            className="h-10 rounded-full border-primary/18 bg-white/80 px-[1.375rem] text-foreground shadow-[0_12px_24px_rgba(24,72,71,0.08)]"
                             onClick={() => stream.stop()}
                           >
                             <LoaderCircle className="h-4 w-4 animate-spin" />
