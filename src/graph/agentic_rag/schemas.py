@@ -11,10 +11,21 @@ class SearchPlan(TypedDict, total=False):
     top_k: int
 
 
+class SQLCandidate(TypedDict, total=False):
+    enabled: bool
+    selected_tables: list[str]
+    reason: str
+
+
+class TablePlan(TypedDict, total=False):
+    table: str
+    key_values: dict[str, list[str]]
+    reason: str
+
+
 class SQLPlan(TypedDict, total=False):
     enabled: bool
-    province: str
-    year: str
+    table_plans: list[TablePlan]
     limit: int
     reason: str
 
@@ -28,6 +39,7 @@ class RAGState(TypedDict, total=False):
 
     # Internal loop state
     search_plan: SearchPlan
+    sql_candidate: SQLCandidate
     sql_plan: SQLPlan
     rag_iteration: int
     max_iterations: int

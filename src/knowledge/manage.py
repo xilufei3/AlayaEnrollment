@@ -147,7 +147,9 @@ def run_query_admission_scores(
 ) -> list[dict]:
     from .sql_queries import query_admission_scores
 
-    return query_admission_scores(province=province, year=year, limit=limit)
+    provinces = [province] if province else []
+    years = [year] if year is not None else []
+    return query_admission_scores(provinces=provinces, years=years, limit=limit)
 
 
 def main() -> None:
