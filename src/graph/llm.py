@@ -29,8 +29,10 @@ def _record_llm_err(model_kind: str, duration: float) -> None:
         pass
 
 
-DEFAULT_QWEN_BASE_URL = "http://star.sustech.edu.cn/service/model/qwen35/v1"
-DEFAULT_QWEN_MODEL_NAME = "qwen3"
+DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+DEFAULT_DEEPSEEK_MODEL_NAME = "deepseek-chat"
+DEFAULT_QWEN_BASE_URL = DEFAULT_DEEPSEEK_BASE_URL
+DEFAULT_QWEN_MODEL_NAME = DEFAULT_DEEPSEEK_MODEL_NAME
 DEFAULT_JINA_MODEL_NAME = "jina-reranker-v3"
 DEFAULT_MODEL_KIND = "generation"
 DEFAULT_INTENT_REQUEST_TIMEOUT = 8.0
@@ -309,9 +311,24 @@ def _build_openai_spec(
     default_max_retries: int,
     disable_thinking: bool = True,
 ) -> dict[str, Any]:
-    base_url = _env_str(f"{prefix}_BASE_URL", _env_str("QWEN_BASE_URL", DEFAULT_QWEN_BASE_URL))
-    api_key = _env_str(f"{prefix}_API_KEY", _env_str("QWEN_API_KEY", "placeholder"))
-    model_name = _env_str(f"{prefix}_MODEL_NAME", _env_str("QWEN_MODEL_NAME", DEFAULT_QWEN_MODEL_NAME))
+    base_url = _env_str(
+        f"{prefix}_BASE_URL",
+        _env_str(
+            "DEEPSEEK_BASE_URL",
+            _env_str("QWEN_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL),
+        ),
+    )
+    api_key = _env_str(
+        f"{prefix}_API_KEY",
+        _env_str("DEEPSEEK_API_KEY", _env_str("QWEN_API_KEY", "placeholder")),
+    )
+    model_name = _env_str(
+        f"{prefix}_MODEL_NAME",
+        _env_str(
+            "DEEPSEEK_MODEL_NAME",
+            _env_str("QWEN_MODEL_NAME", DEFAULT_DEEPSEEK_MODEL_NAME),
+        ),
+    )
     max_tokens = _env_int(f"{prefix}_MAX_TOKENS", default_max_tokens or 0)
 
     spec: dict[str, Any] = {
@@ -323,7 +340,11 @@ def _build_openai_spec(
     }
     if max_tokens > 0:
         spec["max_tokens"] = max_tokens
-    if disable_thinking:
+    needs_disable_thinking = (
+        disable_thinking
+        and ("qwen" in base_url.lower() or "qwen" in spec["model"].lower())
+    )
+    if needs_disable_thinking:
         spec["extra_body"] = dict(DISABLE_THINKING_EXTRA_BODY)
     return _apply_request_budget(
         spec=spec,
@@ -518,6 +539,8 @@ def get_llm_for_node(node_name: str, **overrides: Any) -> Any:
 
 
 __all__ = [
+    "DEFAULT_DEEPSEEK_BASE_URL",
+    "DEFAULT_DEEPSEEK_MODEL_NAME",
     "DEFAULT_JINA_MODEL_NAME",
     "DEFAULT_MODEL_KIND",
     "DEFAULT_QWEN_BASE_URL",

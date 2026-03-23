@@ -283,13 +283,13 @@ _startup_logger = _logging.getLogger("alaya.startup")
 
 # 必须设置的环境变量（值不能为空或 placeholder）
 _REQUIRED_ENV_VARS: tuple[str, ...] = (
-    "QWEN_API_KEY",
+    "DEEPSEEK_API_KEY",
     "JINA_API_KEY",
 )
 
 # 至少其一必须设置
 _REQUIRED_ANY_ENV_GROUPS: tuple[tuple[str, ...], ...] = (
-    ("QWEN_BASE_URL", "DEEPSEEK_BASE_URL"),
+    ("DEEPSEEK_BASE_URL", "QWEN_BASE_URL"),
 )
 
 # 建议设置（缺失时 warning，不阻止启动）
