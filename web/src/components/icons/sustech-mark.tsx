@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { withBasePath } from "@/lib/public-path";
 
 export function SustechMark({
   className,
@@ -16,7 +17,7 @@ export function SustechMark({
       aria-hidden={decorative}
     >
       <img
-        src="/branding/sustech-logo.png"
+        src={withBasePath("/branding/sustech-logo.png")}
         alt={decorative ? "" : "南方科技大学校徽"}
         className="h-full w-full object-contain"
       />

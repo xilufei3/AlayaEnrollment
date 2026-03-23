@@ -42,6 +42,8 @@
                     └──────────┘
 ```
 
+> Docker Compose 模式默认通过 `WEB_HOST_PORT=3001` 将 Next.js 暴露到宿主机（默认 `http://localhost:3001`），可在 `.env` 中自定义；裸机或本地 `npm run dev` 仍使用 3000。
+
 关键设计：
 - **浏览器永远不直连 FastAPI**，通过 Next.js BFF 代理，API Key 在服务端注入
 - **Nginx** 统一入口，处理限流、安全头、HTTPS

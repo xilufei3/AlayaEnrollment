@@ -32,7 +32,7 @@ python main.py
 cd web && npm install && npm run dev
 ```
 
-访问 `http://localhost:3000`。
+访问 `http://localhost:3000`（Docker 模式默认暴露为 `http://localhost:3001`，可在 `.env` 中通过 `WEB_HOST_PORT` 调整）。
 
 后端参数：
 
@@ -48,7 +48,7 @@ cd web && npm install && npm run dev
 | 服务 | 端口 | 说明 |
 |---|---|---|
 | Nginx | 80 | 生产入口（仅 Docker 全栈模式） |
-| Web (Next.js) | 3000 | BFF 代理层 |
+| Web (Next.js) | 3001（Docker 默认）/3000（本地 dev） | BFF 代理层 |
 | Backend (FastAPI) | 8008 | API 服务 |
 | Milvus | 19530 | 向量数据库 |
 | Attu | 8000 | Milvus 管理 UI（仅开发模式） |

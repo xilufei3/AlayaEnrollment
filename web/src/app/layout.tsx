@@ -4,14 +4,15 @@ import { NuqsAdapter } from "nuqs/adapters/next/app";
 
 import "./globals.css";
 import { APP_METADATA } from "@/components/thread/branding";
+import { withBasePath } from "@/lib/public-path";
 
 export const metadata: Metadata = {
   title: APP_METADATA.title,
   description: APP_METADATA.description,
   icons: {
-    icon: "/branding/sustech-logo.png",
-    shortcut: "/branding/sustech-logo.png",
-    apple: "/branding/sustech-logo.png",
+    icon: withBasePath("/branding/sustech-logo.png"),
+    shortcut: withBasePath("/branding/sustech-logo.png"),
+    apple: withBasePath("/branding/sustech-logo.png"),
   },
 };
 
