@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
+from typing import Sequence
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -61,6 +62,17 @@ class AlayaEmbedder:
         self._session = session
         logger.info("AlayaEmbedder initialized: %s", self._url)
 
+    @staticmethod
+    def _validate_dim(vector: list[float]) -> None:
+        expected = config.milvus.embed_dim
+        actual = len(vector)
+        if actual != expected:
+            raise ValueError(
+                "embedding dim mismatch: "
+                f"len(vector)={actual} != EMBED_DIM={expected}. "
+                "Please update EMBED_DIM and recreate the Milvus collection if needed."
+            )
+
     def embed_query(self, query: str) -> EmbeddingResult:
         start = time.monotonic()
         try:
@@ -98,4 +110,15 @@ class AlayaEmbedder:
         )
 
     def embed(self, query: str) -> list[float]:
-        return self.embed_query(query).embedding_vector
+        vector = self.embed_query(query).embedding_vector
+        self._validate_dim(vector)
+        return vector
+
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        embeddings: list[list[float]] = []
+        for text in texts:
+            if not isinstance(text, str) or not text.strip():
+                continue
+            vector = self.embed(text)
+            embeddings.append(vector)
+        return embeddings

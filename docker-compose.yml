@@ -12,7 +12,7 @@ services:
   # ── Infrastructure ──────────────────────────────────────────
 
   etcd:
-    container_name: milvus-etcd
+    container_name: alaya-milvus-etcd
     image: quay.io/coreos/etcd:v3.5.18
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
 
   minio:
-    container_name: milvus-minio
+    container_name: alaya-milvus-minio
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
     environment:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
@@ -38,11 +38,11 @@ services:
     volumes:
       - minio_data:/minio_data
     ports:
-      - "127.0.0.1:9001:9001"
+      - "127.0.0.1:9002:9001"
     restart: unless-stopped
 
   milvus:
-    container_name: milvus-standalone
+    container_name: alaya-milvus-standalone
     image: milvusdb/milvus:v2.5.10
     command: ["milvus", "run", "standalone"]
     environment:
@@ -51,7 +51,7 @@ services:
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
-      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:19531:19530"
     depends_on:
       - etcd
       - minio
@@ -77,6 +77,7 @@ services:
     ports:
       - "127.0.0.1:8008:8008"
     volumes:
+      - ./data:/app/data
       - runtime_data:/app/.runtime
     depends_on:
       milvus:
@@ -105,7 +106,7 @@ services:
       context: .
       dockerfile: infra/docker/nginx.Dockerfile
     ports:
-      - "80:80"
+      - "8082:80"
     depends_on:
       - web
     restart: unless-stopped

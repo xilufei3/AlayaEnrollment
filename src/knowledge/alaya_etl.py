@@ -300,26 +300,29 @@ class AlayaETL:
             if vector is None:
                 vector = row.get("embedding")
 
-            if (
-                not content
-                or not isinstance(vector, list)
-                or not vector
-                or not all(isinstance(x, (int, float)) for x in vector)
-            ):
-                logger.warning("Skipping invalid chunk: content or embedding_vector is empty")
+            if not isinstance(content, str) or not content:
+                logger.warning("Skipping invalid chunk: content is empty")
                 continue
 
-            normalized_vector = [float(x) for x in vector]
             chunk = {
                 "content_md": content,
-                "embedding_vector": normalized_vector,
                 "metadata": {
                     key: value
                     for key, value in row.items()
                     if key not in ("content_md", "embedding_vector", "embedding")
                 },
             }
-            chunk["embedding"] = normalized_vector
+
+            if isinstance(vector, list) and vector and all(isinstance(x, (int, float)) for x in vector):
+                normalized_vector = [float(x) for x in vector]
+                chunk["embedding_vector"] = normalized_vector
+                chunk["embedding"] = normalized_vector
+            elif config.embedding.use_custom:
+                logger.info("Chunk parsed without ALayaData embedding; custom embedding will be applied")
+            else:
+                logger.warning("Skipping invalid chunk: embedding_vector is empty")
+                continue
+
             chunks.append(chunk)
 
         logger.info("Parsed %d valid chunks", len(chunks))

@@ -5,7 +5,7 @@ import threading
 from typing import Any
 
 from ..config.settings import config
-from .alaya_embedder import AlayaEmbedder
+from .embedder import get_embedder
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class VectorManager:
         logger.info("VectorManager: connecting to Milvus ...")
         self._client = MilvusClient(uri=config.milvus.uri)
         self._collection = config.milvus.collection_name
-        self._embedder = AlayaEmbedder()
+        self._embedder = get_embedder()
         try:
             self._client.load_collection(self._collection)
         except Exception as exc:
@@ -141,7 +141,7 @@ class VectorManager:
         logger.info("Collection '%s' flushed", self._collection)
 
     def insert_chunks(self, chunks: list[dict[str, Any]], *, flush: bool = True) -> int:
-        records: list[dict[str, Any]] = []
+        prepared: list[dict[str, Any]] = []
         for chunk in chunks:
             content = chunk.get("content_md") or chunk.get("content")
             vector = (
@@ -156,26 +156,58 @@ class VectorManager:
             if (
                 not isinstance(content, str)
                 or not content
-                or not isinstance(vector, list)
-                or not vector
-                or not all(isinstance(x, (int, float)) for x in vector)
             ):
-                logger.warning("Skipping invalid chunk: empty content or embedding")
+                logger.warning("Skipping invalid chunk: empty content")
                 continue
 
-            record: dict[str, Any] = {
-                "content": content,
-                "dense": [float(x) for x in vector],
-                "source_file": "",
-                "category": "",
-            }
-            source_file = chunk.get("source_file") or metadata.get("source_file")
-            category = chunk.get("category") or metadata.get("category")
-            if isinstance(source_file, str) and source_file:
-                record["source_file"] = source_file
-            if isinstance(category, str) and category:
-                record["category"] = category
-            records.append(record)
+            normalized_vector: list[float] | None = None
+            if isinstance(vector, list) and vector and all(isinstance(x, (int, float)) for x in vector):
+                normalized_vector = [float(x) for x in vector]
+
+            prepared.append(
+                {
+                    "content": content,
+                    "dense": normalized_vector,
+                    "source_file": chunk.get("source_file") or metadata.get("source_file") or "",
+                    "category": chunk.get("category") or metadata.get("category") or "",
+                }
+            )
+
+        if not prepared:
+            return 0
+
+        if config.embedding.use_custom:
+            logger.info("Custom embedding is enabled; re-embedding %d chunks before insert", len(prepared))
+            embedded_vectors = self._embedder.embed_texts([record["content"] for record in prepared])
+            for record, vector in zip(prepared, embedded_vectors, strict=True):
+                record["dense"] = vector
+        else:
+            missing_indexes = [index for index, record in enumerate(prepared) if not record["dense"]]
+            if missing_indexes:
+                logger.info(
+                    "Detected %d chunks without embedding; generating vectors with active embedder",
+                    len(missing_indexes),
+                )
+                backfilled_vectors = self._embedder.embed_texts(
+                    [prepared[index]["content"] for index in missing_indexes]
+                )
+                for index, vector in zip(missing_indexes, backfilled_vectors, strict=True):
+                    prepared[index]["dense"] = vector
+
+        records: list[dict[str, Any]] = []
+        for record in prepared:
+            dense = record.get("dense")
+            if not isinstance(dense, list) or not dense:
+                logger.warning("Skipping record without dense vector after embedding")
+                continue
+            records.append(
+                {
+                    "content": record["content"],
+                    "dense": dense,
+                    "source_file": record["source_file"],
+                    "category": record["category"],
+                }
+            )
 
         return self.insert(records, flush=flush)
 
@@ -191,6 +223,7 @@ class VectorManager:
         output_fields: list[str] | None = None,
         mode: str = SEARCH_HYBRID,
     ) -> list[dict[str, Any]]:
+        self._client.load_collection(self._collection)
         selected_fields = output_fields or ["content", "source_file", "category"]
 
         if mode == SEARCH_VECTOR:

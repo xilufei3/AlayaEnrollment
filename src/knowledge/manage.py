@@ -56,24 +56,25 @@ def _probe_sqlite() -> None:
 
 def _probe_embedder() -> None:
     try:
-        from .alaya_embedder import AlayaEmbedder
+        from .embedder import get_embedder
 
-        vector = AlayaEmbedder().embed("health")
+        vector = get_embedder().embed("health")
         if not vector:
             raise ValueError("empty embedding result")
-        logger.info("embedder is reachable")
+        logger.info("embedder is reachable: provider=%s", config.embedding.provider_name)
     except Exception as exc:
         logger.warning("embedder probe failed: %s", exc)
 
 
 def health_check() -> dict:
-    from .alaya_embedder import AlayaEmbedder
+    from .embedder import get_embedder
     from .vector_manager import VectorManager
     from sqlalchemy import text
 
     status: dict[str, object] = {
         "milvus": False,
         "embedder": False,
+        "embedding_provider": config.embedding.provider_name,
         "sqlite": {},
     }
 
@@ -84,7 +85,7 @@ def health_check() -> dict:
         status["milvus_error"] = str(exc)
 
     try:
-        vector = AlayaEmbedder().embed("health")
+        vector = get_embedder().embed("health")
         status["embedder"] = bool(vector)
         status["embedder_dim"] = len(vector)
     except Exception as exc:

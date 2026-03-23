@@ -60,6 +60,18 @@ def _coerce_str_tuple(value: object, default: tuple[str, ...]) -> tuple[str, ...
     return items or default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    return default
+
+
 class IntentType(str, Enum):
     SCHOOL_OVERVIEW = "school_overview"
     ADMISSION_POLICY = "admission_policy"
@@ -149,6 +161,33 @@ class MilvusConfig:
 class AlayaConfig:
     server_url: str = field(default_factory=lambda: os.getenv("AlayaData_URL", "http://100.64.0.30:6000"))
     timeout: int = 300
+
+
+@dataclass
+class EmbeddingConfig:
+    use_custom: bool = field(default_factory=lambda: _env_bool("USE_CUSTOM_EMBEDDING", False))
+    custom_api_base: str = field(
+        default_factory=lambda: os.getenv("CUSTOM_EMBEDDING_API_BASE", "http://172.18.41.222:18005")
+    )
+    custom_model: str = field(
+        default_factory=lambda: os.getenv("CUSTOM_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B")
+    )
+    custom_api_key: str = field(default_factory=lambda: os.getenv("CUSTOM_EMBEDDING_API_KEY", "").strip())
+    custom_api_key_file: str = field(
+        default_factory=lambda: os.getenv(
+            "CUSTOM_EMBEDDING_API_KEY_FILE",
+            str(REPO_ROOT / ".sglang_api_key"),
+        ).strip()
+    )
+    custom_timeout: int = field(default_factory=lambda: int(os.getenv("CUSTOM_EMBEDDING_TIMEOUT", "120")))
+    custom_batch_size: int = field(
+        default_factory=lambda: max(1, int(os.getenv("CUSTOM_EMBEDDING_BATCH_SIZE", "32")))
+    )
+
+    @property
+    def provider_name(self) -> str:
+        return "custom" if self.use_custom else "alaya"
+
 
 @dataclass
 class RerankConfig:
@@ -257,6 +296,7 @@ class AgentConfig:
     llm: LLMConfig | None = None
     milvus: MilvusConfig | None = None
     alaya: AlayaConfig | None = None
+    embedding: EmbeddingConfig | None = None
     rerank: RerankConfig | None = None
     db: DBConfig | None = None
     ingest: IngestConfig | None = None
@@ -265,6 +305,7 @@ class AgentConfig:
         self.llm = self.llm or LLMConfig()
         self.milvus = self.milvus or MilvusConfig()
         self.alaya = self.alaya or AlayaConfig()
+        self.embedding = self.embedding or EmbeddingConfig()
         self.rerank = self.rerank or RerankConfig()
         self.db = self.db or DBConfig()
         self.ingest = self.ingest or IngestConfig.from_file()
@@ -281,6 +322,7 @@ __all__ = [
     "DEFAULT_FALLBACK_INTENT",
     "HISTORY_LAST_K_TURNS",
     "IngestConfig",
+    "EmbeddingConfig",
     "INTENT_DESCRIPTIONS",
     "IntentType",
     "LLMConfig",
