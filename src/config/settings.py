@@ -153,7 +153,7 @@ class AlayaConfig:
 @dataclass
 class RerankConfig:
     model_id: str = "rerank"
-    top_n: int = field(default_factory=lambda: int(os.getenv("RERANK_TOP_N", "5")))
+    top_n: int = field(default_factory=lambda: int(os.getenv("RERANK_TOP_N", "8")))
 
 
 @dataclass
