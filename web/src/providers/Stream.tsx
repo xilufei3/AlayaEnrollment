@@ -30,6 +30,7 @@ import {
   GraphConnectionInfo,
   shouldShowConnectionForm,
 } from "./stream-connection";
+import { DEFAULT_API_URL, DEFAULT_ASSISTANT_ID } from "./constants";
 
 export type StateType = { messages: Message[]; ui?: UIMessage[] };
 
@@ -48,8 +49,6 @@ type StreamContextType = ReturnType<typeof useTypedStream>;
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
 const THREAD_LIST_REFRESH_DELAY_MS = 4000;
-const DEFAULT_API_URL = "/api";
-const DEFAULT_ASSISTANT_ID = "agent";
 
 async function fetchGraphConnectionInfo(
   apiUrl: string,

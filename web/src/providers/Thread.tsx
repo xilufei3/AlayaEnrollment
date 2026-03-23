@@ -19,6 +19,7 @@ import {
   resolveThreadConnection,
 } from "./thread-query-config";
 import { resolveThreadLookupResponse } from "./thread-response";
+import { DEFAULT_API_URL, DEFAULT_ASSISTANT_ID } from "./constants";
 
 interface ThreadContextType {
   getThreads: () => Promise<Thread[]>;
@@ -39,13 +40,18 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [threadsLoading, setThreadsLoading] = useState(false);
   const deviceId = useMemo(() => getDeviceId(), []);
   const { apiUrl: resolvedApiUrl, assistantId: resolvedAssistantId } = useMemo(
-    () =>
-      resolveThreadConnection({
+    () => {
+      const fallbackApiUrl =
+        process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL;
+      const fallbackAssistantId =
+        process.env.NEXT_PUBLIC_ASSISTANT_ID || DEFAULT_ASSISTANT_ID;
+      return resolveThreadConnection({
         apiUrlFromQuery: apiUrl,
         assistantIdFromQuery: assistantId,
-        envApiUrl: process.env.NEXT_PUBLIC_API_URL,
-        envAssistantId: process.env.NEXT_PUBLIC_ASSISTANT_ID,
-      }),
+        envApiUrl: fallbackApiUrl,
+        envAssistantId: fallbackAssistantId,
+      });
+    },
     [apiUrl, assistantId],
   );
   const threadScopeKey = useMemo(
