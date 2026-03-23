@@ -82,6 +82,7 @@ def query_admission_scores(
     SELECT *
     FROM admission_scores
     WHERE {' AND '.join(where_clauses)}
+    ORDER BY year DESC
     LIMIT CAST(:limit AS INTEGER)
     """
     return SQLManager().execute(sql, params=params)

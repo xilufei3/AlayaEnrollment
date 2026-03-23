@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.documents import Document
+
+
+def _overwrite(left: Any, right: Any) -> Any:
+    """Reducer: last writer wins. Required for fan-out / fan-in merges."""
+    return right
 
 
 class SearchPlan(TypedDict, total=False):
@@ -32,28 +37,29 @@ class SQLPlan(TypedDict, total=False):
 
 class RAGState(TypedDict, total=False):
     # Inputs from WorkflowState
-    query: str
-    intent: str
-    slots: dict[str, str]
-    required_slots: list[str]
+    query: Annotated[str, _overwrite]
+    intent: Annotated[str, _overwrite]
+    slots: Annotated[dict[str, str], _overwrite]
+    required_slots: Annotated[list[str], _overwrite]
 
     # Internal loop state
-    search_plan: SearchPlan
-    sql_candidate: SQLCandidate
-    sql_plan: SQLPlan
-    rag_iteration: int
-    max_iterations: int
+    search_plan: Annotated[SearchPlan, _overwrite]
+    sql_candidate: Annotated[SQLCandidate, _overwrite]
+    sql_plan: Annotated[SQLPlan, _overwrite]
+    rag_iteration: Annotated[int, _overwrite]
+    max_iterations: Annotated[int, _overwrite]
 
     # Retrieval intermediates
-    vector_chunks: list[Document]
-    candidate_vector_chunks: list[Document]
-    structured_chunks: list[Document]
-    structured_results: list[dict[str, Any]]
+    vector_chunks: Annotated[list[Document], _overwrite]
+    candidate_vector_chunks: Annotated[list[Document], _overwrite]
+    reranked_vector_chunks: Annotated[list[Document], _overwrite]
+    structured_chunks: Annotated[list[Document], _overwrite]
+    structured_results: Annotated[list[dict[str, Any]], _overwrite]
 
-    # Final chunks used by rerank/eval and returned to WorkflowState
-    chunks: list[Document]
+    # Final chunks used by eval and returned to WorkflowState
+    chunks: Annotated[list[Document], _overwrite]
 
     # Sufficiency result returned to WorkflowState
-    eval_result: Literal["sufficient", "missing_slots", "insufficient_docs"]
-    missing_slots: list[str]
-    eval_reason: str
+    eval_result: Annotated[Literal["sufficient", "missing_slots", "insufficient_docs"], _overwrite]
+    missing_slots: Annotated[list[str], _overwrite]
+    eval_reason: Annotated[str, _overwrite]

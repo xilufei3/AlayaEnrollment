@@ -46,18 +46,17 @@ def _compile_rag_graph(
     g.add_node("retrieval", create_retrieval_node(retriever=retriever, top_k=top_k))
     g.add_node("sql_plan_builder", create_sql_plan_builder_node(model_id=search_planner_model_id))
     g.add_node("sql_query", create_sql_query_node())
-    g.add_node("merge_context", create_merge_context_node())
     g.add_node("rerank", create_rerank_node())
+    g.add_node("merge_context", create_merge_context_node())
     g.add_node("eval", create_sufficiency_eval_node(model_id=eval_model_id))
 
     g.add_edge(START, "search_planner")
     g.add_edge("search_planner", "retrieval")
     g.add_edge("search_planner", "sql_plan_builder")
+    g.add_edge("retrieval", "rerank")
     g.add_edge("sql_plan_builder", "sql_query")
-    g.add_edge("retrieval", "merge_context")
-    g.add_edge("sql_query", "merge_context")
-    g.add_edge("merge_context", "rerank")
-    g.add_edge("rerank", "eval")
+    g.add_edge(["rerank", "sql_query"], "merge_context")
+    g.add_edge("merge_context", "eval")
     g.add_conditional_edges(
         "eval",
         _route_after_eval,
@@ -98,6 +97,7 @@ def create_agentic_rag_node(
             "sql_plan": {},
             "vector_chunks": [],
             "candidate_vector_chunks": [],
+            "reranked_vector_chunks": [],
             "structured_chunks": [],
             "structured_results": [],
             "chunks": [],

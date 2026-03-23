@@ -131,7 +131,12 @@ def _build_langfuse_client() -> Any | None:
             secret_key=settings.secret_key,
             host=settings.host,
         )
-    except Exception:
+    except Exception as exc:
+        _logging.getLogger(__name__).warning(
+            "Langfuse client initialization failed: %s",
+            exc,
+            exc_info=True,
+        )
         return None
 
 
@@ -198,7 +203,12 @@ def _build_langfuse_handler(
                 kwargs[key] = value
 
         return CallbackHandler(**kwargs)
-    except Exception:
+    except Exception as exc:
+        _logging.getLogger(__name__).warning(
+            "Langfuse callback handler unavailable; request tracing will be skipped: %s",
+            exc,
+            exc_info=True,
+        )
         return None
 
 
