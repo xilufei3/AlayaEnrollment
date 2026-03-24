@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 import logging
+import os
+from datetime import datetime, timezone
 from typing import Any, Sequence
+
+try:  # Python 3.9+
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore[misc, assignment]
 
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.runtime import Runtime
@@ -26,6 +33,37 @@ logger = logging.getLogger(__name__)
 class GenerationComponent:
     def __init__(self, *, model_id: str | None = None) -> None:
         self.model_id = model_id
+
+    @staticmethod
+    def _timezone_name() -> str:
+        return os.getenv("ASSISTANT_TIMEZONE", "").strip() or "Asia/Shanghai"
+
+    @classmethod
+    def _current_datetime_hint(cls) -> str:
+        tz_label = "UTC"
+        tzinfo = timezone.utc
+        tz_name = cls._timezone_name()
+        if ZoneInfo is not None:
+            try:
+                tzinfo = ZoneInfo(tz_name)
+                tz_label = tz_name
+            except Exception:  # pragma: no cover - fall back to UTC if tz unavailable
+                tzinfo = timezone.utc
+                tz_label = "UTC"
+        now_local = datetime.now(tzinfo)
+        display_time = now_local.strftime("%Y年%m月%d日 %H:%M")
+        return f"当前时间：{display_time}（{tz_label}）。当前年份：{now_local.year}年。"
+
+    @staticmethod
+    def _merge_suffixes(*parts: str | None) -> str:
+        merged: list[str] = []
+        for part in parts:
+            if not part:
+                continue
+            text = str(part).strip()
+            if text:
+                merged.append(text)
+        return "\n\n".join(merged)
 
     @staticmethod
     def _to_text(content: Any) -> str:
@@ -87,6 +125,9 @@ class GenerationComponent:
         active_model_kind = model_id or self.model_id or "generation"
         try:
             model = get_model(active_model_kind)
+            datetime_suffix = self._current_datetime_hint()
+            if datetime_suffix:
+                system_prompt = f"{system_prompt.strip()}\n\n{datetime_suffix}"
             response = await model.ainvoke(
                 [
                     ("system", system_prompt),
@@ -126,7 +167,7 @@ class GenerationComponent:
         system_prompt = build_generation_system_prompt(
             intent,
             has_context=has_context,
-            system_suffix=system_suffix,
+            system_suffix=self._merge_suffixes(system_suffix, self._current_datetime_hint()),
         )
         user_prompt = build_generation_user_prompt(
             query=query,

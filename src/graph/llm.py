@@ -314,19 +314,19 @@ def _build_openai_spec(
     base_url = _env_str(
         f"{prefix}_BASE_URL",
         _env_str(
-            "DEEPSEEK_BASE_URL",
-            _env_str("QWEN_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL),
+            "QWEN_BASE_URL",
+            _env_str("DEEPSEEK_BASE_URL", DEFAULT_QWEN_BASE_URL),
         ),
     )
     api_key = _env_str(
         f"{prefix}_API_KEY",
-        _env_str("DEEPSEEK_API_KEY", _env_str("QWEN_API_KEY", "placeholder")),
+        _env_str("QWEN_API_KEY", _env_str("DEEPSEEK_API_KEY", "placeholder")),
     )
     model_name = _env_str(
         f"{prefix}_MODEL_NAME",
         _env_str(
-            "DEEPSEEK_MODEL_NAME",
-            _env_str("QWEN_MODEL_NAME", DEFAULT_DEEPSEEK_MODEL_NAME),
+            "QWEN_MODEL_NAME",
+            _env_str("DEEPSEEK_MODEL_NAME", DEFAULT_QWEN_MODEL_NAME),
         ),
     )
     max_tokens = _env_int(f"{prefix}_MAX_TOKENS", default_max_tokens or 0)

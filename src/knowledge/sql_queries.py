@@ -85,4 +85,16 @@ def query_admission_scores(
     ORDER BY year DESC
     LIMIT CAST(:limit AS INTEGER)
     """
-    return SQLManager().execute(sql, params=params)
+
+    rows = SQLManager().execute(sql, params=params)
+
+    # Backfill admission_count when only physics_review_count is provided. Some
+    # historical rows stored the total count in physics_review_count, so the LLM
+    # would see an empty admission_count (e.g., 2025 entries) and omit the figure.
+    for row in rows:
+        if not str(row.get("admission_count") or "").strip():
+            physics_review = row.get("physics_review_count")
+            if physics_review:
+                row["admission_count"] = physics_review
+
+    return rows
