@@ -52,7 +52,9 @@ def test_sql_query_node_passes_multi_value_filters(monkeypatch) -> None:
         "years": ["2023", "2024"],
         "limit": 6,
     }
-    assert result["structured_results"][0]["province"] == "广东"
+    assert result["structured_results"][0]["table"] == "admission_scores"
+    assert result["structured_results"][0]["query_key"] == ["province", "year"]
+    assert result["structured_results"][0]["items"][0]["province"] == "广东"
 
 
 def test_sql_query_node_skips_when_plan_disabled(monkeypatch) -> None:

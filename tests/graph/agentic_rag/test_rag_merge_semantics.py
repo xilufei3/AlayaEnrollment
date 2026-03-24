@@ -105,7 +105,15 @@ def test_agentic_rag_graph_merges_after_rerank(monkeypatch) -> None:
 
     async def sql_query_node(_state):
         return {
-            "structured_results": [{"province": "guangdong"}],
+            "structured_results": [
+                {
+                    "table": "admission_scores",
+                    "description": "scores",
+                    "query_key": ["province"],
+                    "columns": {"province": "省份"},
+                    "items": [{"province": "guangdong"}],
+                }
+            ],
         }
 
     async def rerank_node(state):
@@ -171,5 +179,13 @@ def test_agentic_rag_graph_merges_after_rerank(monkeypatch) -> None:
     )
 
     assert [doc.page_content for doc in result["chunks"]] == ["reranked vector"]
-    assert result["structured_results"] == [{"province": "guangdong"}]
+    assert result["structured_results"] == [
+        {
+            "table": "admission_scores",
+            "description": "scores",
+            "query_key": ["province"],
+            "columns": {"province": "省份"},
+            "items": [{"province": "guangdong"}],
+        }
+    ]
     assert result["missing_slots"] == []

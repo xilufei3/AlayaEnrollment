@@ -126,3 +126,61 @@ def test_search_planner_disables_sql_for_rule_question(monkeypatch) -> None:
 
     assert result["sql_candidate"]["enabled"] is False
     assert result["sql_candidate"]["selected_tables"] == []
+
+
+def test_search_planner_passes_previous_eval_reason_as_retry_context(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class DummyModel:
+        async def ainvoke(self, messages, response_format=None):
+            captured["messages"] = messages
+            return {
+                "rewritten_query": "广东 近年 录取分数 位次 招生人数",
+                "reason": "补充更多角度",
+                "sql_candidate": {
+                    "enabled": True,
+                    "selected_tables": ["admission_scores"],
+                    "reason": "录取数据查询",
+                },
+            }
+
+    class DummySQLManager:
+        def get_all_table_meta(self) -> dict[str, Any]:
+            return {
+                "admission_scores": {
+                    "description": "各省各年份录取分数数据",
+                    "use_when": ["查询某省某年的录取分数", "查询近几年录取情况"],
+                    "query_key": ["province", "year"],
+                    "columns": {
+                        "province": "省份名称",
+                        "year": "年份",
+                    },
+                }
+            }
+
+    monkeypatch.setattr(
+        "src.graph.agentic_rag.node.search_planner.get_model",
+        lambda _model_id: DummyModel(),
+    )
+    monkeypatch.setattr(
+        "src.graph.agentic_rag.node.search_planner.SQLManager",
+        lambda: DummySQLManager(),
+    )
+
+    node = create_search_planner_node(model_id="planner")
+    _run_node(
+        node,
+        {
+            "query": "广东近几年录取情况怎么样",
+            "intent": "admission_policy",
+            "query_mode": "factual_query",
+            "slots": {"province": "广东", "year": "近几年"},
+            "rag_iteration": 1,
+            "eval_reason": "当前问题属于介绍型/事实查询，默认补充一轮检索以扩展覆盖角度；本轮已覆盖要点：1. 2025 录取人数；2. 最低分位次",
+            "chunks": [],
+        },
+    )
+
+    user_message = captured["messages"][1][1]
+    assert "上一轮评估理由（可能包含已覆盖要点，请据此补充未覆盖角度）" in user_message
+    assert "本轮已覆盖要点" in user_message
