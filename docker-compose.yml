@@ -25,7 +25,7 @@ services:
       -listen-client-urls=http://0.0.0.0:2379
       --data-dir=/etcd
     volumes:
-      - etcd_data:/etcd
+      - ./docker-data/etcd:/etcd
     restart: unless-stopped
 
   minio:
@@ -36,9 +36,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
     command: minio server /minio_data --console-address ":9001"
     volumes:
-      - minio_data:/minio_data
-    ports:
-      - "127.0.0.1:9002:9001"
+      - ./docker-data/minio:/minio_data
     restart: unless-stopped
 
   milvus:
@@ -49,7 +47,7 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
     volumes:
-      - milvus_data:/var/lib/milvus
+      - ./docker-data/milvus:/var/lib/milvus
     ports:
       - "127.0.0.1:19531:19530"
     depends_on:
@@ -78,7 +76,7 @@ services:
       - "127.0.0.1:8008:8008"
     volumes:
       - ./data:/app/data
-      - runtime_data:/app/.runtime
+      - ./.runtime:/app/.runtime
     depends_on:
       milvus:
         condition: service_healthy
@@ -110,9 +108,3 @@ services:
     depends_on:
       - web
     restart: unless-stopped
-
-volumes:
-  etcd_data:
-  minio_data:
-  milvus_data:
-  runtime_data:
