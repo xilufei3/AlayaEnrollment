@@ -418,7 +418,7 @@ def create_app() -> FastAPI:
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        if request.url.path in {"/health", "/info", "/metrics"}:
+        if request.url.path in {"/health", "/info", "/metrics", "/wx"}:
             return await call_next(request)
 
         if request.headers.get("x-api-key", "") != shared_key:
@@ -433,7 +433,7 @@ def create_app() -> FastAPI:
     async def enforce_device_rate_limit(request: Request, call_next):
         if request.method == "OPTIONS":
             return await call_next(request)
-        if request.url.path in {"/health", "/info", "/metrics"}:
+        if request.url.path in {"/health", "/info", "/metrics", "/wx"}:
             return await call_next(request)
         device_id = request.headers.get("x-device-id", "").strip()
         if device_id and not await app.state.device_rate_limiter.check(device_id):
@@ -820,6 +820,13 @@ def create_app() -> FastAPI:
         }
         return StreamingResponse(event_iter(), media_type="text/event-stream", headers=headers)
 
+
+    # ── WeChat Official Account adapter ───────────────────────
+    if os.getenv("WECHAT_ENABLED", "").strip().lower() in ("1", "true", "yes"):
+        from .wechat import mount_wechat_routes
+        wx_router = mount_wechat_routes(app.state)
+        app.include_router(wx_router)
+        _logger.info("WeChat adapter enabled — /wx endpoints registered")
     # Observability must be attached last — Starlette runs last-registered
     # middleware first, so access log wraps everything.
     from .observability import attach_observability
