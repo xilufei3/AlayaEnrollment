@@ -82,17 +82,26 @@ class IntentType(str, Enum):
     OTHER = "other"
 
 
+class QueryModeType(str, Enum):
+    INTRODUCTION = "introduction"
+    JUDGMENT = "judgment"
+    FACTUAL_QUERY = "factual_query"
+    COMPARISON = "comparison"
+    ADVICE = "advice"
+    OTHER = "other"
+
+
 INTENT_DESCRIPTIONS: dict[str, str] = {
     IntentType.SCHOOL_OVERVIEW.value: (
         "学校概况：学校定位、办学特色（书院制、导师制、国际化、小班教学、本科生科研）、"
         "校园与城市（深圳优势、校园环境）、师资概况（院士、海归比例、师生比）、科研实力。"
     ),
     IntentType.ADMISSION_POLICY.value: (
-        "招生政策：综合评价631模式详细说明、各省报名条件与资格、招生计划与人数、"
+        "招生政策：综合评价631模式详细说明、各省报名条件与资格、招生计划与人数、招生办联系方式"
         "报名/考核/录取时间节点、能力测试与面试方式、录取规则与历年分数线位次、各省差异政策。"
     ),
     IntentType.MAJOR_AND_TRAINING.value: (
-        "专业与培养：全部本科专业目录与院系归属、各专业培养目标与核心课程、"
+        "专业与培养：全部本科专业目录与院系归属、各专业培养目标与核心课程、专业内容"
         "实验实践环节、大一大二通识培养与专业分流机制、转专业条件与流程。"
     ),
     IntentType.CAREER_AND_DEVELOPMENT.value: (
@@ -113,6 +122,79 @@ INTENT_DESCRIPTIONS: dict[str, str] = {
 
 ALLOWED_INTENTS: tuple[str, ...] = tuple(INTENT_DESCRIPTIONS.keys())
 DEFAULT_FALLBACK_INTENT: IntentType = IntentType.ADMISSION_POLICY
+QUERY_MODE_DESCRIPTIONS: dict[str, str] = {
+    QueryModeType.INTRODUCTION.value: (
+        "介绍型：用户想了解某个学校、专业、政策、制度或校园事项的整体情况，"
+        "核心诉求是建立一个较完整的认识，而不是只问单个事实点或做资格判断。\n"
+        "特征：问题里通常有“介绍一下”“怎么样”“是什么情况”“整体如何”“展开说说”；"
+        "用户希望得到有层次的概览，而不是一个单点数据答案。\n"
+        "跨意图举例：\n"
+        "- 学校概况：介绍一下南科大 / 南科大整体怎么样 / 南科大有什么特色\n"
+        "- 招生政策：综合评价招生整体是怎么回事 / 南科大招生政策大概是怎样的\n"
+        "- 专业培养：计算机专业怎么样 / 介绍一下大类培养和专业分流\n"
+        "- 毕业去向：南科大学生毕业去向怎么样 / 深造就业整体情况如何\n"
+        "- 校园生活：宿舍和书院生活怎么样 / 介绍一下校园生活"
+    ),
+    QueryModeType.JUDGMENT.value: (
+        "判断型：用户想知道自己或某类考生是否符合条件、有没有资格、能不能做某件事，"
+        "核心诉求是得到一个明确判断，而不是只听规则介绍。\n"
+        "特征：问题里通常有“能不能”“有没有资格”“符不符合”“我这种情况”“算不算”“有没有机会”；"
+        "用户往往会带入自己的分数、选科、地区、年级或目标专业。\n"
+        "跨意图举例：\n"
+        "- 招生政策：广东600分有机会吗 / 竞赛生有资格报名吗 / 没选化学还能报吗\n"
+        "- 专业培养：大一可以转专业吗 / GPA不够还能申请转专业吗\n"
+        "- 毕业去向：本科直接就业前景好吗 / 这个专业适合以后读博吗\n"
+        "- 校园生活：低收入家庭能申请助学金吗 / 新生都能申请奖学金吗"
+    ),
+    QueryModeType.FACTUAL_QUERY.value: (
+        "事实查询：用户想获取一个或一组明确的客观信息，答案通常是事实、时间、数字、名单、费用、分数、位次或简短说明。\n"
+        "特征：问题指向具体信息点，通常可以直接作答或用简短表格呈现；"
+        "问题里常见“多少”“几号”“有没有”“是什么”“几人间”“多少分”“多少位次”。\n"
+        "跨意图举例：\n"
+        "- 学校概况：有多少院士 / 学校在哪里 / 师生比是多少\n"
+        "- 招生政策：报名截止时间是什么时候 / 广东今年招多少人 / 近三年录取位次是多少\n"
+        "- 专业培养：有没有金融专业 / 计算机属于哪个学院 / 转专业什么时候申请\n"
+        "- 毕业去向：深造率是多少 / 主要去了哪些学校 / 就业率大概多少\n"
+        "- 校园生活：宿舍几人间 / 学费多少 / 有空调吗 / 住宿费是多少"
+    ),
+    QueryModeType.COMPARISON.value: (
+        "对比型：用户明确想比较两个或多个对象、年份、专业、省份或方案，"
+        "希望了解差异、优劣或变化趋势，而不是分别做独立介绍。\n"
+        "特征：问题里通常有“哪个更”“和……相比”“区别是什么”“差多少”“对比一下”“近几年变化如何”；"
+        "回答时通常需要并列展开后再给总结。\n"
+        "跨意图举例：\n"
+        "- 招生政策：广东和浙江录取难度差多少 / 综合评价和统招有什么区别\n"
+        "- 专业培养：计算机和电子信息哪个好就业 / 直申专业和入学后分流有什么区别\n"
+        "- 毕业去向：境内深造和出国读研哪个比例更高\n"
+        "- 校园生活：不同书院的住宿条件有差别吗"
+    ),
+    QueryModeType.ADVICE.value: (
+        "建议型：用户想获得报考、备考、选专业、发展规划方面的建议，"
+        "核心诉求不是唯一标准答案，而是希望得到可执行的方向性建议。\n"
+        "特征：问题里通常有“怎么准备”“值不值得”“怎么选”“建议”“该怎么办”“适合什么”；"
+        "回答往往需要结合用户情况给出路径，而不是只查事实。\n"
+        "跨意图举例：\n"
+        "- 招生政策：高二现在怎么准备综合评价 / 值不值得冲一下南科大\n"
+        "- 专业培养：我喜欢数学适合报什么专业 / 想做科研该怎么选专业\n"
+        "- 毕业去向：以后想去互联网大厂该怎么规划 / 想出国读研选什么方向更合适\n"
+        "- 学校概况：南科大适合什么样的学生 / 什么样的考生更建议重点关注南科大"
+    ),
+    QueryModeType.OTHER.value: (
+        "其它：用户的话不属于以上几类中的主要任务，通常是寒暄、感谢、轻松闲聊、泛化追问，"
+        "或者信息目标不够明确、问题形态混杂但主诉求不突出、当前无法稳定判断应归入哪一种模式，"
+        "暂时不适合进入完整答题模式。\n"
+        "特征：问题里没有清晰的介绍、判断、查询、对比或建议诉求；"
+        "或者虽然涉及招生相关内容，但主问题形态不明确，继续强行细分反而容易误判；"
+        "更适合简短回应后继续引导用户明确问题。\n"
+        "跨意图举例：\n"
+        "- 互动：你好 / 谢谢老师 / 明白了\n"
+        "- 泛化开场：我先随便了解一下 / 最近有点想看看南科大\n"
+        "- 模糊追问：这个呢 / 那另一个怎么样 / 还有别的吗\n"
+        "- 模式不明确：我这种情况怎么说呢 / 这个到底算哪种 / 先大概聊聊吧"
+    ),
+}
+ALLOWED_QUERY_MODES: tuple[str, ...] = tuple(QUERY_MODE_DESCRIPTIONS.keys())
+DEFAULT_QUERY_MODE: QueryModeType = QueryModeType.FACTUAL_QUERY
 
 CONFIDENCE_THRESHOLD: float = float(os.getenv("INTENT_CONFIDENCE_THRESHOLD", "0.55"))
 
@@ -127,17 +209,11 @@ REQUIRED_SLOTS_BY_INTENT: dict[str, list[str]] = {
 # 槽位定义：供大模型抽取时参考，键为槽位名，值为说明
 SLOT_DESCRIPTIONS: dict[str, str] = {
     "province": "考生所在省份/直辖市/自治区，如：浙江、广东、北京、上海。仅当用户明确提到或可推断时填写，否则空字符串。",
-    "year": "招生年份，如：2024、2025。仅当用户明确提到年份时填写，否则空字符串。",
-}
-
-# 缺槽位时反问话术（agentic_rag 内 build_clarify 与 generation 节点缺槽追问共用）
-SLOT_CLARIFY_PROMPTS: dict[str, str] = {
-    "province": "请问您是哪个省份的考生？这样我才能给出准确的招生政策信息。",
-    "year": "请问您想咨询哪一年的招生政策？",
+    "year": "招生年份或时间表达，如：2024、2025、2023-2025、近几年、近两年、往年。year 必须根据当前用户这一问单独提取并更新；如果当前问题没有明确时间表达，则填空字符串。",
 }
 
 # 对话历史：提取最近 k 轮（每轮=1 条用户+1 条助手），供后续节点使用
-HISTORY_LAST_K_TURNS: int = 2
+HISTORY_LAST_K_TURNS: int = 4
 
 
 @dataclass
@@ -315,11 +391,13 @@ config = AgentConfig()
 
 __all__ = [
     "ALLOWED_INTENTS",
+    "ALLOWED_QUERY_MODES",
     "AgentConfig",
     "AlayaConfig",
     "CONFIDENCE_THRESHOLD",
     "DBConfig",
     "DEFAULT_FALLBACK_INTENT",
+    "DEFAULT_QUERY_MODE",
     "HISTORY_LAST_K_TURNS",
     "IngestConfig",
     "EmbeddingConfig",
@@ -327,11 +405,12 @@ __all__ = [
     "IntentType",
     "LLMConfig",
     "MilvusConfig",
+    "QUERY_MODE_DESCRIPTIONS",
+    "QueryModeType",
     "SQLIngestConfig",
     "REPO_ROOT",
     "RerankConfig",
     "REQUIRED_SLOTS_BY_INTENT",
-    "SLOT_CLARIFY_PROMPTS",
     "SLOT_DESCRIPTIONS",
     "SRC_ROOT",
     "VectorIngestConfig",

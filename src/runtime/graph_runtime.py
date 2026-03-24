@@ -338,11 +338,10 @@ class AdmissionGraphRuntime:
         "intent_classify",      # 意图识别
         "direct_reply",         # 寒暄 / 超范围 / 低置信度短回复
         "agentic_rag",          # Agentic RAG（检索+评估循环）
-        "slot_followup",        # 缺槽位追问
         "generate",             # RAG 生成答案
     )
 
-    _ANSWER_NODES = {"generate", "direct_reply", "slot_followup"}
+    _ANSWER_NODES = {"generate", "direct_reply"}
 
     def __init__(self, cfg: RuntimeConfig) -> None:
         self.cfg = cfg

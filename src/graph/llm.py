@@ -64,7 +64,6 @@ NODE_MODEL_KIND_MAP: dict[str, str] = {
     "direct_reply": "generation",
     "generate": "generation",
     "generation": "generation",
-    "slot_followup": "generation",
     "search_planner": "planner",
     "planner": "planner",
     "eval": "eval",

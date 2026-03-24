@@ -9,7 +9,6 @@ from .agentic_rag.graph import create_agentic_rag_node
 from .node.direct_reply import create_direct_reply_node
 from .node.generation import create_generation_node
 from .node.intent_classify import create_intent_classify_node
-from .node.slot_followup import create_slot_followup_node
 from .state import WorkflowState
 
 
@@ -25,8 +24,6 @@ def route_after_intent(state: WorkflowState) -> str:
 
 
 def route_after_rag(state: WorkflowState) -> str:
-    if state.get("missing_slots"):
-        return "slot_followup"
     return "generate"
 
 
@@ -60,7 +57,6 @@ def create_graph(
         ),
     )
     graph.add_node("direct_reply", create_direct_reply_node(model_id="generation"))
-    graph.add_node("slot_followup", create_slot_followup_node(model_id="generation"))
     graph.add_node("generate", create_generation_node(model_id="generation"))
 
     graph.add_edge(START, "intent_classify")
@@ -76,12 +72,10 @@ def create_graph(
         "agentic_rag",
         route_after_rag,
         {
-            "slot_followup": "slot_followup",
             "generate": "generate",
         },
     )
     graph.add_edge("direct_reply", END)
-    graph.add_edge("slot_followup", END)
     graph.add_edge("generate", END)
 
     final_checkpointer = checkpointer if checkpointer is not None else init_args.get("checkpointer")
