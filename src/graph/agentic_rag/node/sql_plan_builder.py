@@ -7,7 +7,6 @@ from typing import Any
 from ....knowledge import SQLManager
 from ...llm import ModelRequestTimeoutError, get_model
 from ...prompts.sql_plan_builder import SQL_PLAN_BUILDER_SYSTEM_PROMPT
-from ...utils import query_prefers_year_range as shared_query_prefers_year_range
 from ..schemas import RAGState, SQLCandidate, SQLPlan, TablePlan
 
 logger = logging.getLogger(__name__)
@@ -22,17 +21,6 @@ def _default_sql_plan(reason: str) -> SQLPlan:
         "limit": _DEFAULT_SQL_LIMIT,
         "reason": reason,
     }
-
-
-def _query_prefers_year_range(query: str) -> bool:
-    return shared_query_prefers_year_range(query)
-
-
-def _mask_slots_for_query(query: str, slots: dict[str, str]) -> dict[str, str]:
-    effective_slots = dict(slots)
-    if _query_prefers_year_range(query):
-        effective_slots.pop("year", None)
-    return effective_slots
 
 
 def _normalize_list(value: Any) -> list[str]:
@@ -54,13 +42,20 @@ def _normalize_list(value: Any) -> list[str]:
     return normalized
 
 
-def _selected_table_context(selected_tables: list[str]) -> tuple[dict[str, Any], str]:
+def _selected_table_meta(selected_tables: list[str]) -> dict[str, Any]:
     manager = SQLManager()
-    context: dict[str, Any] = {}
+    meta_by_table: dict[str, Any] = {}
     for table_name in selected_tables:
         meta = manager.get_table_meta(table_name)
         if not meta:
             continue
+        meta_by_table[table_name] = dict(meta)
+    return meta_by_table
+
+
+def _selected_table_context(table_meta: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    context: dict[str, Any] = {}
+    for table_name, meta in table_meta.items():
         context[table_name] = {
             "description": str(meta.get("description", "")).strip(),
             "query_key": [
@@ -77,6 +72,21 @@ def _selected_table_context(selected_tables: list[str]) -> tuple[dict[str, Any],
     return context, json.dumps(context, ensure_ascii=False, sort_keys=True)
 
 
+def _build_key_values(
+    *,
+    query_keys: list[str],
+    raw_key_values: dict[str, Any],
+    slots: dict[str, str],
+) -> dict[str, list[str]]:
+    key_values: dict[str, list[str]] = {}
+    for key in query_keys:
+        values = _normalize_list(raw_key_values.get(key))
+        if not values:
+            values = _normalize_list(slots.get(key))
+        key_values[key] = values
+    return key_values
+
+
 def _fallback_table_plans(
     selected_tables: list[str],
     table_meta: dict[str, Any],
@@ -86,9 +96,11 @@ def _fallback_table_plans(
     for table_name in selected_tables:
         meta = table_meta.get(table_name) or {}
         query_keys = [str(item).strip() for item in list(meta.get("query_key") or []) if str(item).strip()]
-        key_values: dict[str, list[str]] = {}
-        for key in query_keys:
-            key_values[key] = _normalize_list(slots.get(key))
+        key_values = _build_key_values(
+            query_keys=query_keys,
+            raw_key_values={},
+            slots=slots,
+        )
         table_plans.append(
             {
                 "table": table_name,
@@ -117,12 +129,11 @@ def _normalize_table_plans(
         meta = table_meta.get(table_name) or {}
         query_keys = [str(key).strip() for key in list(meta.get("query_key") or []) if str(key).strip()]
         raw_key_values = dict(item.get("key_values") or {})
-        key_values: dict[str, list[str]] = {}
-        for key in query_keys:
-            values = _normalize_list(raw_key_values.get(key))
-            if not values:
-                values = _normalize_list(slots.get(key))
-            key_values[key] = values
+        key_values = _build_key_values(
+            query_keys=query_keys,
+            raw_key_values=raw_key_values,
+            slots=slots,
+        )
 
         normalized.append(
             {
@@ -138,7 +149,11 @@ def _normalize_table_plans(
             continue
         meta = table_meta.get(table_name) or {}
         query_keys = [str(key).strip() for key in list(meta.get("query_key") or []) if str(key).strip()]
-        key_values = {key: _normalize_list(slots.get(key)) for key in query_keys}
+        key_values = _build_key_values(
+            query_keys=query_keys,
+            raw_key_values={},
+            slots=slots,
+        )
         normalized.append(
             {
                 "table": table_name,
@@ -159,13 +174,15 @@ async def _llm_build_sql_plan(
     sql_candidate: SQLCandidate,
 ) -> SQLPlan:
     selected_tables = [str(item).strip() for item in list(sql_candidate.get("selected_tables") or []) if str(item).strip()]
-    table_meta, table_context = _selected_table_context(selected_tables)
+    table_meta = _selected_table_meta(selected_tables)
+    _, table_context = _selected_table_context(table_meta)
     model = get_model(model_id)
     user_prompt = "\n".join(
         [
             f"用户问题：{query}",
             f"意图：{intent}",
             f"已知信息：{json.dumps(slots, ensure_ascii=False)}",
+            "时间口径提示：正常情况下默认锚点按 2026 理解；今年=[2026]，往年=[2025]，去年=[2025]；涉及“近几年/近两年/近三年”等近年范围时，以 2025 为锚点，例如近两年=[2025, 2024]；如果当前问题没有明确 year，默认输出 [2025, 2024, 2023]。",
             f"SQL 候选表：{json.dumps(selected_tables, ensure_ascii=False)}",
             f"候选表结构：{table_context}",
             "请输出 SQL 查询计划 JSON。",
@@ -206,7 +223,7 @@ def create_sql_plan_builder_node(*, model_id: str | None = None):
     async def sql_plan_builder_node(state: RAGState) -> dict[str, SQLPlan]:
         query = str(state.get("query") or "").strip()
         intent = str(state.get("intent") or "").strip()
-        slots = _mask_slots_for_query(query, dict(state.get("slots") or {}))
+        slots = dict(state.get("slots") or {})
         sql_candidate: SQLCandidate = state.get("sql_candidate") or {}
 
         if not bool(sql_candidate.get("enabled")):
@@ -237,10 +254,14 @@ def create_sql_plan_builder_node(*, model_id: str | None = None):
                 type(exc).__name__,
                 exc,
             )
-            table_meta, _ = _selected_table_context(selected_tables)
+            table_meta = _selected_table_meta(selected_tables)
             sql_plan = {
                 "enabled": True,
-                "table_plans": _fallback_table_plans(selected_tables, table_meta, slots),
+                "table_plans": _fallback_table_plans(
+                    selected_tables,
+                    table_meta,
+                    slots,
+                ),
                 "limit": _DEFAULT_SQL_LIMIT,
                 "reason": "根据已选表和已知槽位回退生成",
             }

@@ -9,10 +9,7 @@ from pydantic import BaseModel, Field
 from ....knowledge import SQLManager
 from ...llm import ModelRequestTimeoutError, get_model
 from ...prompts.search_planner import SEARCH_PLANNER_SYSTEM_PROMPT
-from ...utils import (
-    chunk_texts as shared_chunk_texts,
-    query_prefers_year_range as shared_query_prefers_year_range,
-)
+from ...utils import chunk_texts as shared_chunk_texts
 from ..schemas import RAGState, SQLCandidate, SQLPlan, SearchPlan
 
 logger = logging.getLogger(__name__)
@@ -81,17 +78,6 @@ def _default_sql_plan() -> SQLPlan:
     }
 
 
-def _query_prefers_year_range(query: str) -> bool:
-    return shared_query_prefers_year_range(query)
-
-
-def _mask_slots_for_query(query: str, slots: dict[str, str]) -> dict[str, str]:
-    effective_slots = dict(slots)
-    if _query_prefers_year_range(query):
-        effective_slots.pop("year", None)
-    return effective_slots
-
-
 def _chunk_texts(chunks: list[Any]) -> list[str]:
     return shared_chunk_texts(chunks)
 
@@ -149,6 +135,7 @@ async def _llm_plan(
     model_id: str,
     query: str,
     intent: str,
+    query_mode: str,
     slots: dict[str, str],
     iteration: int,
     eval_reason: str,
@@ -158,12 +145,13 @@ async def _llm_plan(
     user_parts = [
         f"用户问题：{query}",
         f"意图：{intent}",
+        f"问题形态：{query_mode}",
         f"已知信息：{json.dumps(slots, ensure_ascii=False)}",
         f"当前检索轮次：{iteration}",
         f"SQL 表能力摘要：{_build_sql_registry_context()}",
     ]
     if eval_reason.strip():
-        user_parts.append(f"上一轮评估理由：{eval_reason.strip()}")
+        user_parts.append(f"上一轮评估理由（可能包含已覆盖要点，请据此补充未覆盖角度）：{eval_reason.strip()}")
     chunk_texts = _chunk_texts(list(chunks or []))
     if chunk_texts:
         user_parts.append("上一轮召回片段原文：\n" + "\n".join(chunk_texts))
@@ -214,8 +202,8 @@ def create_search_planner_node(*, model_id: str | None = None):
     async def search_planner_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
         intent = str(state.get("intent") or "").strip()
+        query_mode = str(state.get("query_mode") or "").strip()
         slots = dict(state.get("slots") or {})
-        effective_slots = _mask_slots_for_query(query, slots)
         iteration = int(state.get("rag_iteration") or 0)
         eval_reason = str(state.get("eval_reason") or "")
         chunks = list(state.get("chunks") or [])
@@ -228,7 +216,8 @@ def create_search_planner_node(*, model_id: str | None = None):
                     model_id=planner_model_kind,
                     query=query,
                     intent=intent,
-                    slots=effective_slots,
+                    query_mode=query_mode,
+                    slots=slots,
                     iteration=iteration,
                     eval_reason=eval_reason,
                     chunks=chunks,
@@ -251,6 +240,7 @@ def create_search_planner_node(*, model_id: str | None = None):
         logger.debug(
             "SearchPlanner done.\n"
             f"intent={intent}\n"
+            f"query_mode={query_mode}\n"
             f"iteration={iteration}\n"
             f"strategy={plan.get('strategy')}\n"
             f"vector_query={plan.get('vector_query', '')[:60]}\n"

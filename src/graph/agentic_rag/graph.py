@@ -23,7 +23,7 @@ def _route_after_eval(state: RAGState) -> str:
     iteration = int(state.get("rag_iteration") or 0)
     max_iter = int(state.get("max_iterations") or 2)
 
-    if eval_result in ("missing_slots", "sufficient"):
+    if eval_result == "sufficient":
         return "__end__"
 
     if iteration >= max_iter:
@@ -88,6 +88,7 @@ def create_agentic_rag_node(
         rag_input: RAGState = {
             "query": str(state.get("query") or "").strip(),
             "intent": str(state.get("intent") or "").strip(),
+            "query_mode": str(state.get("query_mode") or "").strip(),
             "slots": dict(state.get("slots") or {}),
             "required_slots": list(state.get("required_slots") or []),
             "rag_iteration": 0,
