@@ -3,9 +3,11 @@
 Bridges WeChat's XML-based messaging protocol with the existing
 AdmissionGraphRuntime.  Designed for **subscription accounts** (订阅号)
 that do NOT have the Customer Service Message API — replies are sent
-exclusively via the passive-reply mechanism, leveraging WeChat's
-automatic retry (up to 3 attempts within ~15 s) to wait for the AI
-answer to become ready.
+exclusively via the passive-reply mechanism.
+
+Long answers are automatically split into multiple pages.  The first
+page is delivered immediately; the user sends any message (e.g. "继续")
+to retrieve subsequent pages.
 """
 
 from __future__ import annotations
@@ -22,20 +24,14 @@ from fastapi.responses import PlainTextResponse
 
 _logger = logging.getLogger("alaya.wechat")
 
-# WeChat imposes a 2048-char limit on text replies.
-_WX_TEXT_REPLY_MAX_LEN = 2048
+# WeChat imposes a 2048-byte limit on the Content field of text replies.
+_WX_TEXT_REPLY_MAX_BYTES = 2048
 
 # How long to keep a pending entry before garbage-collecting it.
 _PENDING_TTL_SECONDS = 300  # 5 minutes
 
-# After this many seconds since the first request we give up waiting
-# and return a "please retry" hint instead of an empty response.
-_LAST_RETRY_THRESHOLD_SECONDS = 12
+# ── In-memory state per user ──────────────────────────────────────
 
-# ── In-memory pending-answer cache ────────────────────────────────
-
-# {openid: {"msg_id": str, "answer": str|None, "error": str|None,
-#            "task": asyncio.Task, "timestamp": float}}
 _pending: dict[str, dict[str, Any]] = {}
 
 
@@ -46,23 +42,54 @@ def _gc_pending() -> None:
     for k in stale:
         entry = _pending.pop(k, None)
         if entry and "task" in entry:
-            task: asyncio.Task = entry["task"]  # type: ignore[assignment]
+            task: asyncio.Task = entry["task"]
             if not task.done():
                 task.cancel()
+
+
+# ── Text splitting helpers ────────────────────────────────────────
+
+_CONTINUE_HINT = "\n\n——回复任意消息查看下一页——"
+_CONTINUE_HINT_BYTES = len(_CONTINUE_HINT.encode("utf-8"))
+
+
+def _split_to_pages(text: str, max_bytes: int = _WX_TEXT_REPLY_MAX_BYTES) -> list[str]:
+    """Split *text* into pages each fitting within *max_bytes* UTF-8."""
+    if len(text.encode("utf-8")) <= max_bytes:
+        return [text]
+
+    pages: list[str] = []
+    remaining = text
+
+    while remaining:
+        remaining_bytes = len(remaining.encode("utf-8"))
+        if remaining_bytes <= max_bytes:
+            pages.append(remaining)
+            break
+
+        budget = max_bytes - _CONTINUE_HINT_BYTES
+        encoded = remaining.encode("utf-8")[:budget]
+        truncated = encoded.decode("utf-8", errors="ignore")
+
+        # Try to break at last newline for cleaner splits
+        nl = truncated.rfind("\n")
+        if nl > len(truncated) // 3:
+            truncated = truncated[:nl]
+
+        pages.append(truncated + _CONTINUE_HINT)
+        remaining = remaining[len(truncated):].lstrip("\n")
+
+    return pages
 
 
 # ── XML helpers ───────────────────────────────────────────────────
 
 def _parse_xml(body: bytes) -> dict[str, str]:
-    """Parse a WeChat XML message into a flat dict."""
-    root = ET.fromstring(body)  # noqa: S314 — input is from WeChat servers
+    root = ET.fromstring(body)  # noqa: S314
     return {child.tag: (child.text or "") for child in root}
 
 
 def _text_reply(from_user: str, to_user: str, content: str) -> str:
-    """Build a WeChat passive text-reply XML string."""
-    if len(content) > _WX_TEXT_REPLY_MAX_LEN:
-        content = content[: _WX_TEXT_REPLY_MAX_LEN - 20] + "\n\n（回复过长，已截断）"
     ts = int(time.time())
     return (
         "<xml>"
@@ -75,8 +102,6 @@ def _text_reply(from_user: str, to_user: str, content: str) -> str:
     )
 
 
-# ── Signature verification ────────────────────────────────────────
-
 def _check_signature(token: str, signature: str, timestamp: str, nonce: str) -> bool:
     parts = sorted([token, timestamp, nonce])
     digest = hashlib.sha1("".join(parts).encode()).hexdigest()  # noqa: S324
@@ -86,7 +111,6 @@ def _check_signature(token: str, signature: str, timestamp: str, nonce: str) -> 
 # ── AI task runner ────────────────────────────────────────────────
 
 async def _run_ai(openid: str, message: str, entry: dict[str, Any]) -> None:
-    """Run the AI graph and store the answer in *entry*."""
     from ..runtime.graph_runtime import AdmissionGraphRuntime
 
     runtime: AdmissionGraphRuntime = entry["runtime"]
@@ -102,14 +126,25 @@ async def _run_ai(openid: str, message: str, entry: dict[str, Any]) -> None:
         entry["answer"] = "抱歉，系统处理出错，请稍后再试。"
 
 
+def _deliver_answer(entry: dict[str, Any], gh_id: str, openid: str) -> PlainTextResponse:
+    """Pop the first page from the entry and return it as a reply."""
+    if "pages" not in entry or not entry["pages"]:
+        entry["pages"] = _split_to_pages(entry["answer"])
+
+    page = entry["pages"].pop(0)
+
+    if not entry["pages"]:
+        _pending.pop(openid, None)
+
+    return PlainTextResponse(
+        _text_reply(gh_id, openid, page),
+        media_type="application/xml",
+    )
+
+
 # ── Route factory ─────────────────────────────────────────────────
 
 def mount_wechat_routes(app_state: Any) -> APIRouter:
-    """Create and return the WeChat router bound to *app_state*.
-
-    Call this from ``create_app`` so that the router can access the
-    shared runtime and configuration.
-    """
     import os
 
     wechat_token = os.getenv("WECHAT_TOKEN", "").strip()
@@ -125,15 +160,12 @@ def mount_wechat_routes(app_state: Any) -> APIRouter:
         nonce: str = Query(""),
         echostr: str = Query(""),
     ) -> PlainTextResponse:
-        """WeChat server URL verification."""
         if not _check_signature(wechat_token, signature, timestamp, nonce):
             raise HTTPException(status_code=403, detail="Invalid signature")
         return PlainTextResponse(echostr)
 
     @router.post("/wx")
     async def wx_message(request: Request) -> PlainTextResponse:
-        """Receive a user message from WeChat and reply."""
-        # Verify signature from query params
         params = request.query_params
         sig = params.get("signature", "")
         ts = params.get("timestamp", "")
@@ -163,64 +195,53 @@ def mount_wechat_routes(app_state: Any) -> APIRouter:
         if not openid or not content:
             return PlainTextResponse("success")
 
-        # Periodic garbage collection
         _gc_pending()
-
         runtime = app_state.runtime
 
-        # ── Case 1: cached answer from a PREVIOUS question ────────
+        # ── Remaining pages from a previous answer ────────────────
         if openid in _pending:
             prev = _pending[openid]
-            prev_answer = prev.get("answer")
 
-            if prev_answer and prev.get("msg_id") != msg_id:
-                # Deliver the cached answer, then start processing
-                # the new question in the background.
-                cached = _pending.pop(openid)["answer"]
-                entry: dict[str, Any] = {
-                    "msg_id": msg_id,
-                    "answer": None,
-                    "runtime": runtime,
-                    "timestamp": time.time(),
-                }
-                task = asyncio.create_task(_run_ai(openid, content, entry))
-                entry["task"] = task
-                _pending[openid] = entry
+            # Has undelivered pages → send next page
+            if prev.get("pages"):
+                page = prev["pages"].pop(0)
+                if not prev["pages"]:
+                    _pending.pop(openid, None)
                 return PlainTextResponse(
-                    _text_reply(gh_id, openid, cached),
+                    _text_reply(gh_id, openid, page),
                     media_type="application/xml",
                 )
 
-        # ── Case 2: retry of the SAME message (same MsgId) ───────
+            # Has a complete answer not yet paged (different question)
+            if prev.get("answer") and prev.get("msg_id") != msg_id:
+                return _deliver_answer(prev, gh_id, openid)
+
+        # ── Retry of the SAME message (same MsgId) ───────────────
         if openid in _pending and _pending[openid].get("msg_id") == msg_id:
             entry = _pending[openid]
             if entry.get("answer"):
-                answer = _pending.pop(openid)["answer"]
-                return PlainTextResponse(
-                    _text_reply(gh_id, openid, answer),
-                    media_type="application/xml",
-                )
-            elapsed = time.time() - entry["timestamp"]
-            if elapsed > _LAST_RETRY_THRESHOLD_SECONDS:
-                return PlainTextResponse(
-                    _text_reply(gh_id, openid, "正在思考中，请稍后发送任意消息获取回复~"),
-                    media_type="application/xml",
-                )
-            # Return empty so WeChat retries
-            return PlainTextResponse("success")
+                return _deliver_answer(entry, gh_id, openid)
+            for _ in range(9):
+                await asyncio.sleep(0.5)
+                if entry.get("answer"):
+                    return _deliver_answer(entry, gh_id, openid)
+            return PlainTextResponse(
+                _text_reply(gh_id, openid, "正在思考中，请稍等片刻后发送任意消息获取回复~"),
+                media_type="application/xml",
+            )
 
-        # ── Case 3: brand new message ─────────────────────────────
-        # Cancel any stale pending task for this user
+        # ── Brand new message ─────────────────────────────────────
         if openid in _pending:
             old = _pending.pop(openid)
             if "task" in old:
-                old_task: asyncio.Task = old["task"]  # type: ignore[assignment]
+                old_task: asyncio.Task = old["task"]
                 if not old_task.done():
                     old_task.cancel()
 
-        entry = {
+        entry: dict[str, Any] = {
             "msg_id": msg_id,
             "answer": None,
+            "pages": [],
             "runtime": runtime,
             "timestamp": time.time(),
         }
@@ -228,7 +249,14 @@ def mount_wechat_routes(app_state: Any) -> APIRouter:
         entry["task"] = task
         _pending[openid] = entry
 
-        # Return empty — WeChat will retry in ~5 s
-        return PlainTextResponse("success")
+        for _ in range(9):
+            await asyncio.sleep(0.5)
+            if entry.get("answer"):
+                return _deliver_answer(entry, gh_id, openid)
+
+        return PlainTextResponse(
+            _text_reply(gh_id, openid, "正在思考中，请稍等片刻后发送任意消息获取回复~"),
+            media_type="application/xml",
+        )
 
     return router

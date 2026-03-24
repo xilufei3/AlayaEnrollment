@@ -75,7 +75,7 @@ services:
       - MILVUS_URI=http://milvus:19530
       - RUNTIME_ROOT=/app/.runtime
     ports:
-      - "127.0.0.1:8008:8008"
+      - "0.0.0.0:8008:8008"
     volumes:
       - ./data:/app/data
       - runtime_data:/app/.runtime
