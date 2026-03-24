@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, TypedDict
 
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage
 from langgraph.graph import add_messages
+
+from .structured_results import StructuredTableResult
 
 
 class WorkflowState(TypedDict, total=False):
@@ -15,6 +17,7 @@ class WorkflowState(TypedDict, total=False):
 
     query: str
     intent: str
+    query_mode: str
     confidence: float
 
     # Global slot memory + turn-specific slot needs
@@ -24,7 +27,7 @@ class WorkflowState(TypedDict, total=False):
 
     # Retrieval + generation
     chunks: list[Document]
-    structured_results: list[dict[str, Any]]
+    structured_results: list[StructuredTableResult]
     citations: list[dict[str, str]]
     retrieval_skipped: bool
 
