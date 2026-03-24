@@ -18,7 +18,7 @@ from ...config.settings import (
     SLOT_DESCRIPTIONS,
 )
 from ..llm import ModelRequestTimeoutError, get_model
-from ..prompts import INTENT_CLASSIFIER_SYSTEM_PROMPT_TEMPLATE
+from ..prompts.intent_classify import INTENT_CLASSIFIER_SYSTEM_PROMPT_TEMPLATE
 from ..state import WorkflowState
 from ..utils import (
     extract_query_from_state as shared_extract_query_from_state,

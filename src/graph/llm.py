@@ -61,10 +61,9 @@ MODEL_KIND_ALIASES: dict[str, str] = {
 NODE_MODEL_KIND_MAP: dict[str, str] = {
     "intent_classify": "intent",
     "intent_classifier": "intent",
+    "direct_reply": "generation",
     "generate": "generation",
     "generation": "generation",
-    "out_of_scope_reply": "generation",
-    "chitchat_reply": "generation",
     "slot_followup": "generation",
     "search_planner": "planner",
     "planner": "planner",

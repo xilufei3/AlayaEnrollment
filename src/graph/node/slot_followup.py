@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 
 from ...config.settings import HISTORY_LAST_K_TURNS
-from ..prompts import (
+from ..prompts.slot_followup import (
     MISSING_SLOT_SHORT_FOLLOWUP_SYSTEM_PROMPT,
     build_missing_slot_context_suffix,
 )

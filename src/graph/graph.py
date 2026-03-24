@@ -6,10 +6,9 @@ from langgraph.graph import END, START, StateGraph
 
 from ..config.settings import CONFIDENCE_THRESHOLD, IntentType
 from .agentic_rag.graph import create_agentic_rag_node
-from .node.chitchat import create_chitchat_node
+from .node.direct_reply import create_direct_reply_node
 from .node.generation import create_generation_node
 from .node.intent_classify import create_intent_classify_node
-from .node.out_of_scope import create_out_of_scope_node
 from .node.slot_followup import create_slot_followup_node
 from .state import WorkflowState
 
@@ -19,9 +18,9 @@ def route_after_intent(state: WorkflowState) -> str:
     confidence = float(state.get("confidence") or 0.0)
 
     if intent == IntentType.OUT_OF_SCOPE.value:
-        return "out_of_scope_reply"
+        return "direct_reply"
     if intent == IntentType.OTHER.value or confidence < CONFIDENCE_THRESHOLD:
-        return "chitchat_reply"
+        return "direct_reply"
     return "agentic_rag"
 
 
@@ -60,8 +59,7 @@ def create_graph(
             search_planner_model_id="planner",
         ),
     )
-    graph.add_node("out_of_scope_reply", create_out_of_scope_node(model_id="generation"))
-    graph.add_node("chitchat_reply", create_chitchat_node(model_id="generation"))
+    graph.add_node("direct_reply", create_direct_reply_node(model_id="generation"))
     graph.add_node("slot_followup", create_slot_followup_node(model_id="generation"))
     graph.add_node("generate", create_generation_node(model_id="generation"))
 
@@ -70,8 +68,7 @@ def create_graph(
         "intent_classify",
         route_after_intent,
         {
-            "out_of_scope_reply": "out_of_scope_reply",
-            "chitchat_reply": "chitchat_reply",
+            "direct_reply": "direct_reply",
             "agentic_rag": "agentic_rag",
         },
     )
@@ -83,8 +80,7 @@ def create_graph(
             "generate": "generate",
         },
     )
-    graph.add_edge("out_of_scope_reply", END)
-    graph.add_edge("chitchat_reply", END)
+    graph.add_edge("direct_reply", END)
     graph.add_edge("slot_followup", END)
     graph.add_edge("generate", END)
 
