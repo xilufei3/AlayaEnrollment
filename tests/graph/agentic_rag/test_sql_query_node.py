@@ -53,7 +53,6 @@ def test_sql_query_node_passes_multi_value_filters(monkeypatch) -> None:
         "limit": 6,
     }
     assert result["structured_results"][0]["province"] == "广东"
-    assert result["structured_chunks"][0].metadata["table"] == "admission_scores"
 
 
 def test_sql_query_node_skips_when_plan_disabled(monkeypatch) -> None:
@@ -83,7 +82,7 @@ def test_sql_query_node_skips_when_plan_disabled(monkeypatch) -> None:
     )
 
     assert called["value"] is False
-    assert result == {"structured_results": [], "structured_chunks": []}
+    assert result == {"structured_results": []}
 
 
 def test_sql_query_node_skips_when_no_supported_table_plan(monkeypatch) -> None:
@@ -119,4 +118,4 @@ def test_sql_query_node_skips_when_no_supported_table_plan(monkeypatch) -> None:
     )
 
     assert called["value"] is False
-    assert result == {"structured_results": [], "structured_chunks": []}
+    assert result == {"structured_results": []}

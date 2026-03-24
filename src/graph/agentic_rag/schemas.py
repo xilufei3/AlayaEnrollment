@@ -53,7 +53,6 @@ class RAGState(TypedDict, total=False):
     vector_chunks: Annotated[list[Document], _overwrite]
     candidate_vector_chunks: Annotated[list[Document], _overwrite]
     reranked_vector_chunks: Annotated[list[Document], _overwrite]
-    structured_chunks: Annotated[list[Document], _overwrite]
     structured_results: Annotated[list[dict[str, Any]], _overwrite]
 
     # Final chunks used by eval and returned to WorkflowState

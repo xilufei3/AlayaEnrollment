@@ -98,7 +98,6 @@ def create_agentic_rag_node(
             "vector_chunks": [],
             "candidate_vector_chunks": [],
             "reranked_vector_chunks": [],
-            "structured_chunks": [],
             "structured_results": [],
             "chunks": [],
             "eval_result": "",

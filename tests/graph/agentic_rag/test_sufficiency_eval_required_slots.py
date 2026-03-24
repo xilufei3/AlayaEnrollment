@@ -79,3 +79,40 @@ def test_sufficiency_eval_uses_required_slots_even_when_intent_default_is_empty(
 
     assert result["eval_result"] == "missing_slots"
     assert result["missing_slots"] == ["province"]
+
+
+def test_sufficiency_eval_accepts_structured_results_without_chunks(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyModel:
+        async def ainvoke(self, messages, response_format=None):
+            captured["messages"] = messages
+            captured["response_format"] = response_format
+            return {
+                "eval_result": "sufficient",
+                "missing_slots": [],
+                "reason": "sql rows are enough",
+            }
+
+    monkeypatch.setattr(
+        "src.graph.agentic_rag.node.sufficiency_eval.get_model",
+        lambda _model_id: DummyModel(),
+    )
+
+    node = create_sufficiency_eval_node(model_id="eval")
+    result = _run_node(
+        node,
+        {
+            "query": "广东 2024 年录取分数线是多少",
+            "intent": "admission_policy",
+            "slots": {},
+            "required_slots": [],
+            "chunks": [],
+            "structured_results": [{"province": "广东", "year": 2024, "min_score": "632"}],
+        }
+    )
+
+    assert result["eval_result"] == "sufficient"
+    user_prompt = captured["messages"][1][1]
+    assert "结构化 SQL 结果" in user_prompt
+    assert '"province": "广东"' in user_prompt

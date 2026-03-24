@@ -7,14 +7,13 @@ from typing import Any
 from langchain_core.documents import Document
 
 from ...llm import ModelRequestTimeoutError, get_model
-from ...prompts import SUFFICIENCY_EVAL_SYSTEM_PROMPT
+from ...prompts.sufficiency_eval import SUFFICIENCY_EVAL_SYSTEM_PROMPT
 from ..schemas import RAGState
 
 logger = logging.getLogger(__name__)
 
+
 def _chunk_summary(chunks: list[Document], max_chars: int = 6000) -> str:
-    if not chunks:
-        return "（当前没有可用材料）"
     lines: list[str] = []
     total = 0
     for index, doc in enumerate(chunks, start=1):
@@ -24,6 +23,35 @@ def _chunk_summary(chunks: list[Document], max_chars: int = 6000) -> str:
         if total >= max_chars:
             break
     return "\n".join(lines)
+
+
+def _structured_results_summary(rows: list[dict[str, Any]], max_chars: int = 3000) -> str:
+    lines: list[str] = []
+    total = 0
+    for index, row in enumerate(rows, start=1):
+        text = json.dumps(row, ensure_ascii=False)
+        lines.append(f"[SQL {index}] {text}")
+        total += len(text)
+        if total >= max_chars:
+            break
+    return "\n".join(lines)
+
+
+def _material_summary(
+    *,
+    chunks: list[Document],
+    structured_results: list[dict[str, Any]],
+) -> str:
+    parts: list[str] = []
+    chunk_text = _chunk_summary(chunks)
+    structured_text = _structured_results_summary(structured_results)
+    if chunk_text:
+        parts.append(f"非结构化材料：\n{chunk_text}")
+    if structured_text:
+        parts.append(f"结构化 SQL 结果：\n{structured_text}")
+    if not parts:
+        return "（当前没有可用材料）"
+    return "\n\n".join(parts)
 
 
 class SufficiencyEvaluator:
@@ -37,9 +65,10 @@ class SufficiencyEvaluator:
         intent: str,
         missing_slots: list[str],
         chunks: list[Document],
+        structured_results: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        # 快速规则：空文档直接 insufficient_docs
-        if not chunks:
+        # 快速规则：无非结构化材料且无结构化结果时直接 insufficient_docs
+        if not chunks and not structured_results:
             return {
                 "eval_result": "insufficient_docs",
                 "missing_slots": [],
@@ -60,6 +89,7 @@ class SufficiencyEvaluator:
                 query=query,
                 intent=intent,
                 chunks=chunks,
+                structured_results=structured_results,
             )
         except ModelRequestTimeoutError:
             raise
@@ -68,7 +98,7 @@ class SufficiencyEvaluator:
             return {
                 "eval_result": "insufficient_docs",
                 "missing_slots": [],
-                "eval_reason": "LLM eval failed, fallback to retry",
+                "eval_reason": "大模型评估失败，回退后重试",
             }
 
     async def _llm_evaluate(
@@ -77,12 +107,13 @@ class SufficiencyEvaluator:
         query: str,
         intent: str,
         chunks: list[Document],
+        structured_results: list[dict[str, Any]],
     ) -> dict[str, Any]:
         model = get_model(self.model_id)
         user_prompt = (
             f"用户问题：{query}\n"
             f"意图：{intent}\n"
-            f"可用材料摘要：\n{_chunk_summary(chunks)}\n"
+            f"可用材料摘要：\n{_material_summary(chunks=chunks, structured_results=structured_results)}\n"
             "请评估这些材料是否足以直接回答用户。"
         )
         response = await model.ainvoke(
@@ -98,7 +129,7 @@ class SufficiencyEvaluator:
                 return {
                     "eval_result": "insufficient_docs",
                     "missing_slots": [],
-                    "eval_reason": "LLM returned invalid JSON",
+                    "eval_reason": "大模型返回的 JSON 无效",
                 }
         else:
             data = content
@@ -122,6 +153,7 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
         intent = str(state.get("intent") or "").strip()
         missing_slots = list(state.get("missing_slots") or [])
         chunks = list(state.get("chunks") or [])
+        structured_results = list(state.get("structured_results") or [])
         iteration = int(state.get("rag_iteration") or 0)
         max_iter = int(state.get("max_iterations") or 2)
 
@@ -131,7 +163,7 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
             return {
                 "eval_result": "sufficient",
                 "missing_slots": [],
-                "eval_reason": "max_iterations reached",
+                "eval_reason": "已达到最大迭代次数",
             }
 
         result = await evaluator.evaluate(
@@ -139,11 +171,13 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
             intent=intent,
             missing_slots=missing_slots,
             chunks=chunks,
+            structured_results=structured_results,
         )
         logger.debug(
             "SufficiencyEval done.\n"
             f"intent={intent}\n"
             f"chunks={len(chunks)}\n"
+            f"structured_results={len(structured_results)}\n"
             f"eval_result={result['eval_result']}\n"
             f"reason={result['eval_reason']}"
         )

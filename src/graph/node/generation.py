@@ -15,7 +15,7 @@ from langgraph.runtime import Runtime
 
 from ...config.settings import HISTORY_LAST_K_TURNS
 from ..llm import ModelRequestTimeoutError, get_model
-from ..prompts import (
+from ..prompts.generation import (
     build_generation_system_prompt,
     build_generation_user_prompt,
 )
@@ -81,7 +81,7 @@ class GenerationComponent:
     def _structured_results_text(rows: Sequence[dict[str, Any]]) -> str:
         lines: list[str] = []
         for i, row in enumerate(rows[:6], start=1):
-            lines.append(f"[SQL {i}] {row}")
+            lines.append(f"【SQL 结果 {i}】{row}")
         return "\n".join(lines)
 
     @classmethod
@@ -160,7 +160,7 @@ class GenerationComponent:
         if chunk_texts:
             context_parts.append("\n".join(chunk_texts))
         if structured_text:
-            context_parts.append(f"SQL structured results:\n{structured_text}")
+            context_parts.append(f"SQL 结构化结果：\n{structured_text}")
         context = "\n\n".join(context_parts) if context_parts else "（当前没有可用材料）"
         history = self._history_text(messages or [])
 

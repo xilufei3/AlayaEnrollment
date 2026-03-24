@@ -6,7 +6,7 @@ from typing import Any
 
 from ....knowledge import SQLManager
 from ...llm import ModelRequestTimeoutError, get_model
-from ...prompts import SQL_PLAN_BUILDER_SYSTEM_PROMPT
+from ...prompts.sql_plan_builder import SQL_PLAN_BUILDER_SYSTEM_PROMPT
 from ...utils import query_prefers_year_range as shared_query_prefers_year_range
 from ..schemas import RAGState, SQLCandidate, SQLPlan, TablePlan
 
@@ -93,7 +93,7 @@ def _fallback_table_plans(
             {
                 "table": table_name,
                 "key_values": key_values,
-                "reason": "fallback from selected tables and slots",
+                "reason": "根据已选表和已知槽位回退生成",
             }
         )
     return table_plans
@@ -143,7 +143,7 @@ def _normalize_table_plans(
             {
                 "table": table_name,
                 "key_values": key_values,
-                "reason": "fallback from selected tables and slots",
+                "reason": "根据已选表和已知槽位回退生成",
             }
         )
 
@@ -210,7 +210,7 @@ def create_sql_plan_builder_node(*, model_id: str | None = None):
         sql_candidate: SQLCandidate = state.get("sql_candidate") or {}
 
         if not bool(sql_candidate.get("enabled")):
-            return {"sql_plan": _default_sql_plan("sql_candidate disabled")}
+            return {"sql_plan": _default_sql_plan("SQL 候选未启用")}
 
         selected_tables = [
             str(item).strip()
@@ -218,7 +218,7 @@ def create_sql_plan_builder_node(*, model_id: str | None = None):
             if str(item).strip()
         ]
         if not selected_tables:
-            return {"sql_plan": _default_sql_plan("no selected tables")}
+            return {"sql_plan": _default_sql_plan("没有选中的数据表")}
 
         active_model = model_id or "planner"
         try:
@@ -242,7 +242,7 @@ def create_sql_plan_builder_node(*, model_id: str | None = None):
                 "enabled": True,
                 "table_plans": _fallback_table_plans(selected_tables, table_meta, slots),
                 "limit": _DEFAULT_SQL_LIMIT,
-                "reason": "fallback from selected tables and slots",
+                "reason": "根据已选表和已知槽位回退生成",
             }
 
         logger.debug(

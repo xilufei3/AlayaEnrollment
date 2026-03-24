@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from ....knowledge import SQLManager
 from ...llm import ModelRequestTimeoutError, get_model
-from ...prompts import SEARCH_PLANNER_SYSTEM_PROMPT
+from ...prompts.search_planner import SEARCH_PLANNER_SYSTEM_PROMPT
 from ...utils import (
     chunk_texts as shared_chunk_texts,
     query_prefers_year_range as shared_query_prefers_year_range,
@@ -29,9 +29,9 @@ _DEFAULT_SQL_LIMIT = 6
 
 
 class SearchPlanLLMOutput(BaseModel):
-    rewritten_query: str = Field(default="", description="Main rewritten retrieval query")
-    reason: str = Field(default="", description="Planner reason")
-    sql_candidate: dict[str, Any] = Field(default_factory=dict, description="SQL routing candidate")
+    rewritten_query: str = Field(default="", description="改写后的主检索查询")
+    reason: str = Field(default="", description="规划理由")
+    sql_candidate: dict[str, Any] = Field(default_factory=dict, description="SQL 路由候选结果")
 
 
 def _get_top_k(intent: str, iteration: int) -> int:
@@ -68,7 +68,7 @@ def _default_sql_candidate() -> SQLCandidate:
     return {
         "enabled": False,
         "selected_tables": [],
-        "reason": "sql disabled by default",
+        "reason": "默认不启用 SQL",
     }
 
 
@@ -77,7 +77,7 @@ def _default_sql_plan() -> SQLPlan:
         "enabled": False,
         "table_plans": [],
         "limit": _DEFAULT_SQL_LIMIT,
-        "reason": "sql_plan_builder not run",
+        "reason": "尚未执行 SQL 查询计划构建",
     }
 
 
@@ -166,7 +166,7 @@ async def _llm_plan(
         user_parts.append(f"上一轮评估理由：{eval_reason.strip()}")
     chunk_texts = _chunk_texts(list(chunks or []))
     if chunk_texts:
-        user_parts.append("上一轮召回 chunk 原文：\n" + "\n".join(chunk_texts))
+        user_parts.append("上一轮召回片段原文：\n" + "\n".join(chunk_texts))
     user_parts.append("请输出检索参数 JSON。")
     user_prompt = "\n".join(user_parts)
 

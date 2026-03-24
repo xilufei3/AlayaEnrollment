@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from typing import Any
-
-from langchain_core.documents import Document
 
 from ....knowledge import query_admission_scores
 from ..schemas import RAGState, SQLPlan, TablePlan
@@ -44,17 +41,6 @@ def _normalize_text_list(value: Any) -> list[str]:
     return normalized
 
 
-def _row_to_document(row: dict[str, Any], index: int, table_name: str) -> Document:
-    return Document(
-        page_content=json.dumps(row, ensure_ascii=False),
-        metadata={
-            "source": "sql",
-            "table": table_name,
-            "row_index": index,
-        },
-    )
-
-
 def _find_table_plan(sql_plan: SQLPlan, table_name: str) -> TablePlan | None:
     for item in list(sql_plan.get("table_plans") or []):
         if not isinstance(item, dict):
@@ -69,11 +55,11 @@ def create_sql_query_node():
     async def sql_query_node(state: RAGState) -> dict[str, Any]:
         sql_plan: SQLPlan = state.get("sql_plan") or {}
         if not bool(sql_plan.get("enabled")):
-            return {"structured_results": [], "structured_chunks": []}
+            return {"structured_results": []}
 
         table_plan = _find_table_plan(sql_plan, "admission_scores")
         if table_plan is None:
-            return {"structured_results": [], "structured_chunks": []}
+            return {"structured_results": []}
 
         key_values = dict(table_plan.get("key_values") or {})
         provinces = _normalize_text_list(key_values.get("province"))
@@ -99,15 +85,8 @@ def create_sql_query_node():
         except Exception as exc:
             _record_sql(time.monotonic() - start, False)
             logger.error("SQL query error %s: %s", type(exc).__name__, exc)
-            return {"structured_results": [], "structured_chunks": []}
+            return {"structured_results": []}
 
-        docs = [
-            _row_to_document(row=row, index=i, table_name="admission_scores")
-            for i, row in enumerate(rows, start=1)
-        ]
-        return {
-            "structured_results": rows,
-            "structured_chunks": docs,
-        }
+        return {"structured_results": rows}
 
     return sql_query_node

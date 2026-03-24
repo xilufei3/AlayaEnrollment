@@ -149,8 +149,8 @@ def test_search_planner_prompt_preserves_user_question_and_adds_normalized_rewri
 def test_search_planner_prompt_expands_search_terms_without_widening_scope():
     assert "“录取情况”补充为“录取分数 位次 招生录取情况”" in SEARCH_PLANNER_SYSTEM_PROMPT
     assert "不能把“广东录取情况”改写成“南科大报考建议”" in SEARCH_PLANNER_SYSTEM_PROMPT
-    assert "- rewritten_query: 改写后的主查询" in SEARCH_PLANNER_SYSTEM_PROMPT
-    assert "- sub_queries: 子查询列表" not in SEARCH_PLANNER_SYSTEM_PROMPT
+    assert "- `rewritten_query`: 改写后的主查询" in SEARCH_PLANNER_SYSTEM_PROMPT
+    assert "- `sub_queries`: 子查询列表" not in SEARCH_PLANNER_SYSTEM_PROMPT
 
 
 def test_search_planner_prompt_expands_broad_questions_but_keeps_narrow_ones_tight():
@@ -227,5 +227,5 @@ def test_generation_component_treats_structured_results_as_available_context(mon
     system_prompt = fake_model.requests[0][0][1]
     user_prompt = fake_model.requests[0][1][1]
     assert "我这边暂时没查到这项官方信息" not in system_prompt
-    assert "SQL structured results" in user_prompt
+    assert "SQL 结构化结果" in user_prompt
     assert "（当前没有可用材料）" not in user_prompt
