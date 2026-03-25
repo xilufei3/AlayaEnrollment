@@ -20,9 +20,9 @@ from src.graph.prompts import (
 def test_generation_prompt_pushes_direct_answer_and_reduces_document_tone():
     prompt = build_generation_system_prompt("admission_policy", "factual_query", has_context=True)
 
-    assert "语气像招生老师或招生顾问" in prompt
-    assert "严禁编造数据" in prompt
-    assert "不要向用户暴露检索、知识库、参考文档等内部过程" in prompt
+    assert "以招生顾问的口吻作答" in prompt
+    assert "只能来自本轮注入的【参考材料】" in prompt
+    assert "暴露内部流程的表述" in prompt
     for phrase in BANNED_PROVENANCE_PHRASES:
         assert phrase in prompt
 
@@ -30,18 +30,19 @@ def test_generation_prompt_pushes_direct_answer_and_reduces_document_tone():
 def test_generation_prompt_stays_close_to_current_query_without_extra_analysis():
     prompt = build_generation_system_prompt("admission_policy", "factual_query", has_context=True)
 
-    assert "这是事实查询问题" in prompt
-    assert "直接给出用户查询的那个事实，简洁收住" in prompt
-    assert "不要在事实之后主动补充建议" in prompt
+    assert "## 作答结构：事实查询型" in prompt
+    assert "开头直接给出核心事实，无须铺垫。" in prompt
+    assert "不主动补充建议或政策背景" in prompt
 
 
 def test_generation_prompt_distinguishes_broad_and_narrow_questions():
     intro_prompt = build_generation_system_prompt("school_overview", "introduction", has_context=True)
     factual_prompt = build_generation_system_prompt("school_overview", "factual_query", has_context=True)
 
-    assert "帮助用户快速建立整体认知" in intro_prompt
-    assert "不要把介绍型问题答成零散问答" in intro_prompt
-    assert "直接给出用户查询的那个事实，简洁收住" in factual_prompt
+    assert "## 作答结构：介绍型" in intro_prompt
+    assert "开头 1-2 句给出整体印象或总述。" in intro_prompt
+    assert "## 作答结构：事实查询型" in factual_prompt
+    assert "开头直接给出核心事实，无须铺垫。" in factual_prompt
 
 
 def test_generation_prompt_uses_conditional_data_format_guidance():
@@ -53,15 +54,15 @@ def test_generation_prompt_uses_conditional_data_format_guidance():
         context="[1] 广东 2024 最低分 632",
     )
 
-    assert "如果 SQL 结构化数据可用，优先使用 SQL 查询的结果" in system_prompt
-    assert "当材料里存在明确对比维度时，优先用简洁表格" in user_prompt
+    assert "结构化数据（SQL 查询结果）可用时，优先采用" in system_prompt
+    assert "存在明确对比维度时，优先用简洁表格呈现。" in user_prompt
 
 
 def test_generation_prompt_requires_policy_content_to_reference_official_notice():
     prompt = build_generation_system_prompt("admission_policy", "factual_query", has_context=True)
 
-    assert "如果回答涉及招生政策" in prompt
-    assert "以南方科技大学招生办公室当年发布的官方公告" in prompt
+    assert "涉及招生政策、报名资格、时间节点" in prompt
+    assert "具体以南方科技大学招生办公室当年发布的官方公告或简章为准。" in prompt
 
 
 def test_generation_prompt_uses_neutral_consultation_voice():
@@ -70,15 +71,16 @@ def test_generation_prompt_uses_neutral_consultation_voice():
     assert "服务对象是高中生和家长" not in prompt
     assert "面向考生和家长" not in prompt
     assert "南方科技大学本科招生咨询助手" in prompt
-    assert "默认锚点按 2026 理解" in prompt
-    assert "近两年=2025、2024" in prompt
+    assert "| 今年 / 当年 | 2026 |" in prompt
+    assert "| 近两年 | 2025、2024 |" in prompt
 
 
 def test_generation_prompt_uses_user_facing_language_when_context_is_missing():
     prompt = build_generation_system_prompt("admission_policy", "factual_query", has_context=False)
 
-    assert "你没有找到能支撑这个问题的官方材料" in prompt
-    assert "招生网 [https://admission.sustech.edu.cn]" in prompt
+    assert "本轮参考材料为空或不包含能支撑当前问题的官方信息。" in prompt
+    assert "zsb@sustech.edu.cn" in prompt
+    assert "http://zs.sustech.edu.cn" in prompt
     assert "当前暂无相关检索文档" not in prompt
 
 
@@ -90,8 +92,9 @@ def test_generation_user_prompt_tells_model_to_answer_current_question_only():
         context="[1] 广东 2024 最低分 632",
     )
 
-    assert "请先回答用户当前这个问题" in prompt
-    assert "不要补充用户没有问到的分析或建议" in prompt
+    assert "## 用户问题" in prompt
+    assert "直接回答当前问题，不偏题。" in prompt
+    assert "材料中未出现的内容不得补充。" in prompt
 
 
 def test_generation_user_prompt_uses_conditional_scope_and_format_triggers():
@@ -102,24 +105,24 @@ def test_generation_user_prompt_uses_conditional_scope_and_format_triggers():
         context="[1] 广东 2024 最低分 632",
     )
 
-    assert "当问题属于`introduction`或`factual_query`时，才在同一主题下适度补充相关维度" in prompt
-    assert "当材料里存在明确对比维度时，优先用简洁表格" in prompt
+    assert "仅当问题形态为 introduction 或 factual_query 时" in prompt
+    assert "存在明确对比维度时，优先用简洁表格呈现。" in prompt
 
 
 def test_admission_policy_prompt_defaults_to_recent_overview_before_strategy():
     prompt = build_generation_system_prompt("admission_policy", "introduction", has_context=True)
 
-    assert '这是"招生政策"意图' in prompt
-    assert "综合评价招生、631 模式" in prompt
+    assert "## 当前话题范围：招生政策" in prompt
+    assert "综合评价招生、631 录取模式" in prompt
     assert "历年分数与位次" in prompt
 
 
 def test_generation_prompt_allows_direct_inference_but_blocks_strategy_jump():
     prompt = build_generation_system_prompt("major_and_training", "judgment", has_context=True)
 
-    assert "这是判断型问题" in prompt
-    assert "给出明确判断结论，并说明判断依据，就此收住" in prompt
-    assert "不要在判断之后扩展成政策介绍" in prompt
+    assert "## 作答结构：判断型" in prompt
+    assert "首句直接给出结论：能 / 不能 / 视具体情况而定。" in prompt
+    assert "不延伸为政策介绍" in prompt
 
 
 def test_generation_user_prompt_allows_precise_inference_without_extra_judgment():
@@ -130,9 +133,9 @@ def test_generation_user_prompt_allows_precise_inference_without_extra_judgment(
         context="[1] 该专业选科要求：物理+化学",
     )
 
-    assert "【问题形态】" in prompt
+    assert "## 问题形态" in prompt
     assert "judgment" in prompt
-    assert "不要补充用户没有问到的分析或建议" in prompt
+    assert "直接回答当前问题，不偏题。" in prompt
 
 
 def test_intent_prompt_is_grounded_in_undergraduate_admissions_dialogue():
@@ -215,9 +218,9 @@ def test_generation_component_uses_shared_counselor_style_prompt(monkeypatch):
 
     system_prompt = fake_model.requests[0][0][1]
     user_prompt = fake_model.requests[0][1][1]
-    assert "这是事实查询问题" in system_prompt
-    assert '不要用"文档中提到"' in system_prompt
-    assert "先直接回答用户当前这个问题" in user_prompt
+    assert "## 作答结构：事实查询型" in system_prompt
+    assert '"文档中提到"' in system_prompt
+    assert "直接回答当前问题，不偏题。" in user_prompt
 
 
 def test_generation_component_treats_structured_results_as_available_context(monkeypatch):
@@ -267,4 +270,4 @@ def test_generation_component_treats_structured_results_as_available_context(mon
     assert "SQL 结构化结果" in user_prompt
     assert "admission_scores" in user_prompt
     assert "字段说明" in user_prompt
-    assert "（当前没有可用材料）" not in user_prompt
+    assert "（本轮无可用参考材料）" not in user_prompt
