@@ -12,15 +12,19 @@ from pydantic import BaseModel, Field
 
 from ...config.settings import (
     ALLOWED_INTENTS,
+    ALLOWED_QUERY_MODES,
     DEFAULT_FALLBACK_INTENT,
+    DEFAULT_QUERY_MODE,
     HISTORY_LAST_K_TURNS,
     INTENT_DESCRIPTIONS,
+    QUERY_MODE_DESCRIPTIONS,
     SLOT_DESCRIPTIONS,
 )
 from ..llm import ModelRequestTimeoutError, get_model
-from ..prompts import INTENT_CLASSIFIER_SYSTEM_PROMPT_TEMPLATE
+from ..prompts.intent_classify import INTENT_CLASSIFIER_SYSTEM_PROMPT_TEMPLATE
 from ..state import WorkflowState
 from ..utils import (
+    extract_year_slot_from_query,
     extract_query_from_state as shared_extract_query_from_state,
     normalize_messages as shared_normalize_messages,
     to_text as shared_to_text,
@@ -32,6 +36,7 @@ GLOBAL_SLOT_NAMES: tuple[str, ...] = ("province", "year")
 
 class IntentClassificationResult(BaseModel):
     intent: str = Field(..., description="intent label")
+    query_mode: str = Field(..., description="question shape label")
     reason: str = Field(..., description="short reason")
     confidence: float = Field(..., ge=0.0, le=1.0)
     slots: dict[str, str] = Field(default_factory=dict, description="extracted slots: province, year")
@@ -70,15 +75,6 @@ def normalize_required_slots(raw_required_slots: Any) -> list[str]:
     return required_slots
 
 
-def get_missing_slots_for_query(*, required_slots: Sequence[str], slots: dict[str, str]) -> list[str]:
-    missing: list[str] = []
-    for name in required_slots:
-        value = str(slots.get(name, "")).strip()
-        if not value:
-            missing.append(name)
-    return missing
-
-
 class EnrollmentIntentClassifier:
     def __init__(self, *, model_id: str | None = None) -> None:
         self.model_id = model_id
@@ -92,6 +88,13 @@ class EnrollmentIntentClassifier:
             return value
         return DEFAULT_FALLBACK_INTENT.value
 
+    @staticmethod
+    def _normalize_query_mode(query_mode: str) -> str:
+        value = query_mode.strip().lower()
+        if value in ALLOWED_QUERY_MODES:
+            return value
+        return DEFAULT_QUERY_MODE.value
+
     async def classify(
         self,
         *,
@@ -103,6 +106,11 @@ class EnrollmentIntentClassifier:
         model = get_model(active_model_kind)
         system_prompt = self._prompt.format_prompt(
             intent_descriptions=json.dumps(INTENT_DESCRIPTIONS, ensure_ascii=False, indent=2),
+            query_mode_descriptions=json.dumps(
+                QUERY_MODE_DESCRIPTIONS,
+                ensure_ascii=False,
+                indent=2,
+            ),
             slot_descriptions=json.dumps(SLOT_DESCRIPTIONS, ensure_ascii=False, indent=2),
         )
         system_str = system_prompt.to_string()
@@ -120,6 +128,7 @@ class EnrollmentIntentClassifier:
             raise ValueError("intent classify output is not a JSON object")
 
         intent = self._normalize_intent(str(data.get("intent", "")))
+        query_mode = self._normalize_query_mode(str(data.get("query_mode", "")))
         reason = str(data.get("reason", "")).strip()
         try:
             confidence = float(data.get("confidence", 0.0))
@@ -132,6 +141,7 @@ class EnrollmentIntentClassifier:
 
         return IntentClassificationResult(
             intent=intent,
+            query_mode=query_mode,
             reason=reason,
             confidence=confidence,
             slots=slots,
@@ -179,12 +189,14 @@ def create_intent_classify_node(*, model_id: str | None = None):
                 model_id=runtime_model_id,
             )
             intent = result.intent
+            query_mode = result.query_mode
             confidence = result.confidence
             slots = dict(result.slots or {})
             required_slots = list(result.required_slots or [])
             logger.debug(
                 "Intent classified.\n"
                 f"intent={result.intent}\n"
+                f"query_mode={result.query_mode}\n"
                 f"confidence={result.confidence:.2f}\n"
                 f"reason={result.reason}\n"
                 f"slots={slots}\n"
@@ -194,6 +206,7 @@ def create_intent_classify_node(*, model_id: str | None = None):
             raise
         except Exception as exc:
             intent = DEFAULT_FALLBACK_INTENT.value
+            query_mode = DEFAULT_QUERY_MODE.value
             confidence = 0.0
             slots = {}
             required_slots = []
@@ -203,16 +216,26 @@ def create_intent_classify_node(*, model_id: str | None = None):
                 f"fallback_intent={intent}"
             )
 
+        current_query_year = extract_year_slot_from_query(query)
+        if current_query_year:
+            slots["year"] = current_query_year
+        else:
+            slots.pop("year", None)
+
         merged_slots = normalize_slots(state.get("slots") or {})
         merged_slots.update(slots)
-        missing_slots = get_missing_slots_for_query(required_slots=required_slots, slots=merged_slots)
+        if current_query_year:
+            merged_slots["year"] = current_query_year
+        else:
+            merged_slots.pop("year", None)
         return {
             "query": query,
             "intent": intent,
+            "query_mode": query_mode,
             "confidence": confidence,
             "slots": merged_slots,
             "required_slots": required_slots,
-            "missing_slots": missing_slots,
+            "missing_slots": [],
         }
 
     return intent_classify_node

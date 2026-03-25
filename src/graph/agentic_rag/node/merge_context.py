@@ -7,10 +7,9 @@ from ..schemas import RAGState
 
 def create_merge_context_node():
     async def merge_context_node(state: RAGState) -> dict[str, Any]:
-        structured_chunks = list(state.get("structured_chunks") or [])
         reranked_vector_chunks = list(state.get("reranked_vector_chunks") or [])
         return {
-            "chunks": structured_chunks + reranked_vector_chunks,
+            "chunks": reranked_vector_chunks,
         }
 
     return merge_context_node

@@ -37,7 +37,6 @@ def test_rerank_node_only_reranks_vector_candidates(monkeypatch) -> None:
                 "query": "admission policy",
                 "vector_chunks": [new_vector],
                 "candidate_vector_chunks": [old_vector],
-                "structured_chunks": [sql_doc],
                 "chunks": [sql_doc, old_vector, new_vector],
             }
         )
@@ -56,8 +55,7 @@ def test_rerank_node_only_reranks_vector_candidates(monkeypatch) -> None:
     assert "chunks" not in result
 
 
-def test_merge_context_combines_structured_and_reranked_vectors() -> None:
-    sql_doc = Document(page_content="sql result", metadata={"id": "sql"})
+def test_merge_context_only_keeps_reranked_vectors() -> None:
     reranked_vector = Document(page_content="reranked vector", metadata={"id": "vec"})
     raw_vector = Document(page_content="raw vector", metadata={"id": "raw"})
 
@@ -65,23 +63,18 @@ def test_merge_context_combines_structured_and_reranked_vectors() -> None:
     result = _run_async(
         node(
             {
-                "structured_chunks": [sql_doc],
                 "reranked_vector_chunks": [reranked_vector],
                 "vector_chunks": [raw_vector],
             }
         )
     )
 
-    assert [doc.page_content for doc in result["chunks"]] == [
-        "sql result",
-        "reranked vector",
-    ]
+    assert [doc.page_content for doc in result["chunks"]] == ["reranked vector"]
 
 
 def test_agentic_rag_graph_merges_after_rerank(monkeypatch) -> None:
     vector_doc = Document(page_content="vector doc", metadata={"id": "vec"})
     reranked_doc = Document(page_content="reranked vector", metadata={"id": "vec-r"})
-    sql_doc = Document(page_content="sql doc", metadata={"id": "sql"})
 
     async def search_planner_node(_state):
         return {
@@ -112,8 +105,15 @@ def test_agentic_rag_graph_merges_after_rerank(monkeypatch) -> None:
 
     async def sql_query_node(_state):
         return {
-            "structured_results": [{"province": "guangdong"}],
-            "structured_chunks": [sql_doc],
+            "structured_results": [
+                {
+                    "table": "admission_scores",
+                    "description": "scores",
+                    "query_key": ["province"],
+                    "columns": {"province": "省份"},
+                    "items": [{"province": "guangdong"}],
+                }
+            ],
         }
 
     async def rerank_node(state):
@@ -127,10 +127,7 @@ def test_agentic_rag_graph_merges_after_rerank(monkeypatch) -> None:
         assert [doc.page_content for doc in state.get("reranked_vector_chunks") or []] == [
             "reranked vector"
         ]
-        return {
-            "chunks": list(state.get("structured_chunks") or [])
-            + list(state.get("reranked_vector_chunks") or []),
-        }
+        return {"chunks": list(state.get("reranked_vector_chunks") or [])}
 
     async def eval_node(_state):
         return {
@@ -181,9 +178,14 @@ def test_agentic_rag_graph_merges_after_rerank(monkeypatch) -> None:
         )
     )
 
-    assert [doc.page_content for doc in result["chunks"]] == [
-        "sql doc",
-        "reranked vector",
+    assert [doc.page_content for doc in result["chunks"]] == ["reranked vector"]
+    assert result["structured_results"] == [
+        {
+            "table": "admission_scores",
+            "description": "scores",
+            "query_key": ["province"],
+            "columns": {"province": "省份"},
+            "items": [{"province": "guangdong"}],
+        }
     ]
-    assert result["structured_results"] == [{"province": "guangdong"}]
     assert result["missing_slots"] == []

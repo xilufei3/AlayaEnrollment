@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from langchain_core.documents import Document
 
 from ...llm import ModelRequestTimeoutError, get_model
-from ...prompts import SUFFICIENCY_EVAL_SYSTEM_PROMPT
+from ...prompts.sufficiency_eval import SUFFICIENCY_EVAL_SYSTEM_PROMPT
+from ...structured_results import StructuredTableResult, format_structured_results_for_prompt
 from ..schemas import RAGState
 
 logger = logging.getLogger(__name__)
+_FORCE_EXTRA_ROUND_QUERY_MODES = {"introduction", "factual_query"}
 
-def _chunk_summary(chunks: list[Document], max_chars: int = 6000) -> str:
-    if not chunks:
-        return "（当前没有可用材料）"
+
+def _chunk_summary(chunks: list[Document], max_chars: int = 20000) -> str:
     lines: list[str] = []
     total = 0
     for index, doc in enumerate(chunks, start=1):
@@ -26,6 +28,89 @@ def _chunk_summary(chunks: list[Document], max_chars: int = 6000) -> str:
     return "\n".join(lines)
 
 
+def _structured_results_summary(rows: list[StructuredTableResult], max_chars: int = 10000) -> str:
+    return format_structured_results_for_prompt(rows, max_chars=max_chars)
+
+
+def _material_summary(
+    *,
+    chunks: list[Document],
+    structured_results: list[StructuredTableResult],
+) -> str:
+    parts: list[str] = []
+    chunk_text = _chunk_summary(chunks)
+    structured_text = _structured_results_summary(structured_results)
+    if chunk_text:
+        parts.append(f"非结构化材料：\n{chunk_text}")
+    if structured_text:
+        parts.append(f"结构化 SQL 结果：\n{structured_text}")
+    if not parts:
+        return "（当前没有可用材料）"
+    return "\n\n".join(parts)
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    normalized = _normalize_text(text)
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max_chars - 1].rstrip() + "…"
+
+
+def _extract_chunk_highlights(
+    chunks: list[Document],
+    *,
+    max_items: int = 4,
+    max_chars_per_item: int = 72,
+) -> list[str]:
+    highlights: list[str] = []
+    seen: set[str] = set()
+    for doc in chunks:
+        text = _normalize_text(getattr(doc, "page_content", ""))
+        if not text:
+            continue
+        first_span = re.split(r"[。！？!?；;\n]+", text, maxsplit=1)[0].strip()
+        candidate = _truncate_text(first_span or text, max_chars_per_item)
+        if not candidate or candidate in seen:
+            continue
+        highlights.append(candidate)
+        seen.add(candidate)
+        if len(highlights) >= max_items:
+            break
+    return highlights
+
+
+def _needs_default_extra_round(query_mode: str, iteration: int, max_iter: int) -> bool:
+    normalized_query_mode = str(query_mode or "").strip().lower()
+    return normalized_query_mode in _FORCE_EXTRA_ROUND_QUERY_MODES and iteration < 2 and iteration < max_iter
+
+
+def _compose_eval_reason(
+    *,
+    base_reason: str,
+    chunks: list[Document],
+    include_chunk_highlights: bool,
+    force_retry: bool,
+) -> str:
+    parts: list[str] = []
+    normalized_reason = _normalize_text(base_reason)
+    if normalized_reason:
+        parts.append(normalized_reason)
+    if force_retry:
+        parts.append("当前问题属于介绍型/事实查询，默认补充一轮检索以扩展覆盖角度")
+    if include_chunk_highlights:
+        highlights = _extract_chunk_highlights(chunks)
+        if highlights:
+            numbered = "；".join(f"{index}. {item}" for index, item in enumerate(highlights, start=1))
+            parts.append(f"本轮已覆盖要点：{numbered}")
+        else:
+            parts.append("本轮未召回到明确的非结构化要点")
+    return "；".join(part for part in parts if part).strip()
+
+
 class SufficiencyEvaluator:
     def __init__(self, *, model_id: str) -> None:
         self.model_id = model_id
@@ -35,23 +120,15 @@ class SufficiencyEvaluator:
         *,
         query: str,
         intent: str,
-        missing_slots: list[str],
         chunks: list[Document],
+        structured_results: list[StructuredTableResult],
     ) -> dict[str, Any]:
-        # 快速规则：空文档直接 insufficient_docs
-        if not chunks:
+        # 快速规则：无非结构化材料且无结构化结果时直接 insufficient_docs
+        if not chunks and not structured_results:
             return {
                 "eval_result": "insufficient_docs",
                 "missing_slots": [],
                 "eval_reason": "检索结果为空",
-            }
-
-        # 缺槽位由 intent_classify 统一判定，直接透传
-        if missing_slots:
-            return {
-                "eval_result": "missing_slots",
-                "missing_slots": missing_slots,
-                "eval_reason": f"缺少关键信息: {missing_slots}",
             }
 
         # LLM 只判断文档充分性（sufficient / insufficient_docs）
@@ -60,6 +137,7 @@ class SufficiencyEvaluator:
                 query=query,
                 intent=intent,
                 chunks=chunks,
+                structured_results=structured_results,
             )
         except ModelRequestTimeoutError:
             raise
@@ -68,7 +146,7 @@ class SufficiencyEvaluator:
             return {
                 "eval_result": "insufficient_docs",
                 "missing_slots": [],
-                "eval_reason": "LLM eval failed, fallback to retry",
+                "eval_reason": "大模型评估失败，回退后重试",
             }
 
     async def _llm_evaluate(
@@ -77,12 +155,13 @@ class SufficiencyEvaluator:
         query: str,
         intent: str,
         chunks: list[Document],
+        structured_results: list[StructuredTableResult],
     ) -> dict[str, Any]:
         model = get_model(self.model_id)
         user_prompt = (
             f"用户问题：{query}\n"
             f"意图：{intent}\n"
-            f"可用材料摘要：\n{_chunk_summary(chunks)}\n"
+            f"可用材料摘要：\n{_material_summary(chunks=chunks, structured_results=structured_results)}\n"
             "请评估这些材料是否足以直接回答用户。"
         )
         response = await model.ainvoke(
@@ -98,7 +177,7 @@ class SufficiencyEvaluator:
                 return {
                     "eval_result": "insufficient_docs",
                     "missing_slots": [],
-                    "eval_reason": "LLM returned invalid JSON",
+                    "eval_reason": "大模型返回的 JSON 无效",
                 }
         else:
             data = content
@@ -120,8 +199,9 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
     async def sufficiency_eval_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
         intent = str(state.get("intent") or "").strip()
-        missing_slots = list(state.get("missing_slots") or [])
+        query_mode = str(state.get("query_mode") or "").strip()
         chunks = list(state.get("chunks") or [])
+        structured_results = list(state.get("structured_results") or [])
         iteration = int(state.get("rag_iteration") or 0)
         max_iter = int(state.get("max_iterations") or 2)
 
@@ -131,26 +211,39 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
             return {
                 "eval_result": "sufficient",
                 "missing_slots": [],
-                "eval_reason": "max_iterations reached",
+                "eval_reason": "已达到最大迭代次数",
             }
 
         result = await evaluator.evaluate(
             query=query,
             intent=intent,
-            missing_slots=missing_slots,
             chunks=chunks,
+            structured_results=structured_results,
         )
+        force_retry = _needs_default_extra_round(query_mode, iteration, max_iter)
+        include_chunk_highlights = force_retry or (
+            result["eval_result"] != "sufficient" and iteration < max_iter
+        )
+        eval_reason = _compose_eval_reason(
+            base_reason=str(result.get("eval_reason", "")),
+            chunks=chunks,
+            include_chunk_highlights=include_chunk_highlights,
+            force_retry=force_retry,
+        )
+        eval_result = "insufficient_docs" if force_retry else result["eval_result"]
         logger.debug(
             "SufficiencyEval done.\n"
             f"intent={intent}\n"
+            f"query_mode={query_mode}\n"
             f"chunks={len(chunks)}\n"
-            f"eval_result={result['eval_result']}\n"
-            f"reason={result['eval_reason']}"
+            f"structured_results={len(structured_results)}\n"
+            f"eval_result={eval_result}\n"
+            f"reason={eval_reason}"
         )
         return {
-            "eval_result": result["eval_result"],
+            "eval_result": eval_result,
             "missing_slots": result["missing_slots"],
-            "eval_reason": result["eval_reason"],
+            "eval_reason": eval_reason,
         }
 
     return sufficiency_eval_node

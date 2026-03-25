@@ -6,7 +6,7 @@ from typing import Any
 from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 
-from ..prompts import OUT_OF_SCOPE_FALLBACK_ANSWER, OUT_OF_SCOPE_SYSTEM_PROMPT
+from ..prompts.direct_reply import get_direct_reply_prompt_bundle
 from ..state import WorkflowState
 from ..utils import extract_query_from_state as shared_extract_query_from_state
 from .generation import GenerationComponent
@@ -14,26 +14,33 @@ from .generation import GenerationComponent
 logger = logging.getLogger(__name__)
 
 
-def create_out_of_scope_node(*, model_id: str | None = None):
+def create_direct_reply_node(*, model_id: str | None = None):
     component = GenerationComponent(model_id=model_id)
 
-    async def out_of_scope_node(state: WorkflowState, runtime: Runtime[Any]):
+    async def direct_reply_node(state: WorkflowState, runtime: Runtime[Any]):
         query = shared_extract_query_from_state(state)
+        intent = str(state.get("intent") or "").strip()
         runtime_model_id = getattr(getattr(runtime, "context", None), "chat_model_id", None)
+        system_prompt, fallback_answer = get_direct_reply_prompt_bundle(intent)
 
         user = f"用户问题：{query}\n请输出一句回复："
         answer = await component.generate_short(
-            system_prompt=OUT_OF_SCOPE_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             user_prompt=user,
             model_id=runtime_model_id,
         )
         if not answer:
-            answer = OUT_OF_SCOPE_FALLBACK_ANSWER
+            answer = fallback_answer
 
-        logger.debug(f"OutOfScope done. query={query} answer_len={len(answer)}")
+        logger.debug(
+            "DirectReply done. intent=%s query=%s answer_len=%s",
+            intent,
+            query,
+            len(answer),
+        )
         result: dict[str, Any] = {"answer": answer, "retrieval_skipped": True}
         if answer:
             result["messages"] = [AIMessage(content=answer)]
         return result
 
-    return out_of_scope_node
+    return direct_reply_node

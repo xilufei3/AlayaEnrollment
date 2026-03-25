@@ -336,14 +336,12 @@ def _validate_required_env_vars() -> None:
 class AdmissionGraphRuntime:
     STAGE_ORDER = (
         "intent_classify",      # 意图识别
-        "out_of_scope_reply",   # 超范围拒答
-        "chitchat_reply",       # 寒暄 / 低置信度回复
+        "direct_reply",         # 寒暄 / 超范围 / 低置信度短回复
         "agentic_rag",          # Agentic RAG（检索+评估循环）
-        "slot_followup",        # 缺槽位追问
         "generate",             # RAG 生成答案
     )
 
-    _ANSWER_NODES = {"generate", "out_of_scope_reply", "chitchat_reply", "slot_followup"}
+    _ANSWER_NODES = {"generate", "direct_reply"}
 
     def __init__(self, cfg: RuntimeConfig) -> None:
         self.cfg = cfg

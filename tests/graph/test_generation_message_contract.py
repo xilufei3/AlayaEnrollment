@@ -47,8 +47,7 @@ def test_generation_node_returns_ai_message_delta_and_excludes_current_query_fro
 
 
 def test_generation_node_missing_slots_returns_only_ai_delta(monkeypatch):
-    """When missing_slots is set, generate() still runs (slot_followup handles the short reply).
-    The generation node produces an answer and wraps it as AIMessage."""
+    """Even if missing_slots exists in state, generate() still answers normally."""
 
     async def fake_generate(self, **kwargs):
         return "请补充省份"

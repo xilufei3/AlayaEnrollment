@@ -13,7 +13,24 @@ _YEAR_RANGE_HINTS: tuple[str, ...] = (
     "往年",
     "最近几年",
 )
-_YEAR_RANGE_PATTERN = r"近\d+年"
+_RECENT_YEAR_HINTS: tuple[str, ...] = (
+    "近几年",
+    "近年来",
+    "最近几年",
+    "历年",
+)
+_RELATIVE_YEAR_HINTS: tuple[str, ...] = (
+    "往年",
+    "今年",
+    "去年",
+    "前年",
+)
+_YEAR_RANGE_PATTERN = r"近(?:\d+|[一二两三四五六七八九十]+)年"
+_YEAR_VALUE_PATTERN = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+_YEAR_SPAN_PATTERN = re.compile(
+    r"(?<!\d)((?:19|20)\d{2})(?:年)?(?:到|至|-|—|~|～)((?:19|20)\d{2})(?:年)?(?!\d)"
+)
+_NEAR_YEAR_COUNT_PATTERN = re.compile(r"近(\d+|[一二两三四五六七八九十]+)年")
 
 
 def to_text(content: Any) -> str:
@@ -127,3 +144,47 @@ def query_prefers_year_range(
     if not year_pattern:
         return False
     return bool(re.search(year_pattern, normalized))
+
+
+def _unique_in_order(values: Sequence[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        normalized.append(text)
+        seen.add(text)
+    return normalized
+
+
+def _extract_explicit_years_in_order(text: str) -> list[str]:
+    return _unique_in_order(_YEAR_VALUE_PATTERN.findall(text))
+
+
+def extract_year_slot_from_query(query: str) -> str:
+    normalized = "".join(str(query).split())
+    if not normalized:
+        return ""
+
+    span_match = _YEAR_SPAN_PATTERN.search(normalized)
+    if span_match:
+        return f"{span_match.group(1)}-{span_match.group(2)}"
+
+    explicit_years = _extract_explicit_years_in_order(normalized)
+    if explicit_years:
+        return ",".join(explicit_years)
+
+    near_match = _NEAR_YEAR_COUNT_PATTERN.search(normalized)
+    if near_match:
+        return near_match.group(0)
+
+    for hint in _RECENT_YEAR_HINTS:
+        if hint in normalized:
+            return hint
+
+    for hint in _RELATIVE_YEAR_HINTS:
+        if hint in normalized:
+            return hint
+
+    return ""

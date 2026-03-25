@@ -15,11 +15,12 @@ from langgraph.runtime import Runtime
 
 from ...config.settings import HISTORY_LAST_K_TURNS
 from ..llm import ModelRequestTimeoutError, get_model
-from ..prompts import (
+from ..prompts.generation import (
     build_generation_system_prompt,
     build_generation_user_prompt,
 )
 from ..state import WorkflowState
+from ..structured_results import StructuredTableResult, format_structured_results_for_prompt
 from ..utils import (
     chunk_texts as shared_chunk_texts,
     extract_query_from_state as shared_extract_query_from_state,
@@ -78,11 +79,16 @@ class GenerationComponent:
         return shared_chunk_texts(chunks)
 
     @staticmethod
-    def _structured_results_text(rows: Sequence[dict[str, Any]]) -> str:
-        lines: list[str] = []
-        for i, row in enumerate(rows[:6], start=1):
-            lines.append(f"[SQL {i}] {row}")
-        return "\n".join(lines)
+    def _structured_results_text(rows: Sequence[StructuredTableResult]) -> str:
+        return format_structured_results_for_prompt(rows)
+
+    @staticmethod
+    def _structured_results_guidance_text() -> str:
+        return (
+            "如果需要使用下面的 SQL 结构化数据，请优先依据表说明、字段说明和结果条目作答；"
+            "除非用户明确只问单个字段，否则应尽量完整展示该表已返回的列，不要随意省略结果条目中的字段。"
+            "输出表格时，优先按字段说明中的列顺序组织表头；当数据存在明确对比维度时，请整理成简洁、规范的表格返回。"
+        )
 
     @classmethod
     def _history_text(cls, messages: Sequence[Any], max_turns: int = 6) -> str:
@@ -121,7 +127,7 @@ class GenerationComponent:
         user_prompt: str,
         model_id: str | None = None,
     ) -> str:
-        """单轮短回复，用于缺槽位追问、out_of_scope 等场景。"""
+        """单轮短回复，用于 out_of_scope 等无需检索的场景。"""
         active_model_kind = model_id or self.model_id or "generation"
         try:
             model = get_model(active_model_kind)
@@ -145,8 +151,9 @@ class GenerationComponent:
         *,
         query: str,
         intent: str,
+        query_mode: str,
         chunks: Sequence[Any],
-        structured_results: Sequence[dict[str, Any]] | None = None,
+        structured_results: Sequence[StructuredTableResult] | None = None,
         messages: Sequence[Any] | None = None,
         model_id: str | None = None,
         system_suffix: str = "",
@@ -160,17 +167,20 @@ class GenerationComponent:
         if chunk_texts:
             context_parts.append("\n".join(chunk_texts))
         if structured_text:
-            context_parts.append(f"SQL structured results:\n{structured_text}")
+            context_parts.append(self._structured_results_guidance_text())
+            context_parts.append(f"SQL 结构化结果：\n{structured_text}")
         context = "\n\n".join(context_parts) if context_parts else "（当前没有可用材料）"
         history = self._history_text(messages or [])
 
         system_prompt = build_generation_system_prompt(
             intent,
+            query_mode,
             has_context=has_context,
             system_suffix=self._merge_suffixes(system_suffix, self._current_datetime_hint()),
         )
         user_prompt = build_generation_user_prompt(
             query=query,
+            query_mode=query_mode,
             history=history,
             context=context,
         )
@@ -240,6 +250,7 @@ def create_generation_node(*, model_id: str | None = None):
         try:
             query = _extract_query_from_state(state)
             intent = str(state.get("intent") or "").strip()
+            query_mode = str(state.get("query_mode") or "").strip()
             messages_full = state.get("messages") or []
             runtime_model_id = getattr(getattr(runtime, "context", None), "chat_model_id", None)
 
@@ -253,6 +264,7 @@ def create_generation_node(*, model_id: str | None = None):
             answer = await component.generate(
                 query=query,
                 intent=intent,
+                query_mode=query_mode,
                 chunks=chunks,
                 structured_results=list(state.get("structured_results") or []),
                 messages=messages_for_history,
@@ -261,6 +273,7 @@ def create_generation_node(*, model_id: str | None = None):
             logger.debug(
                 "Generation done.\n"
                 f"intent={intent}\n"
+                f"query_mode={query_mode}\n"
                 f"query={query}\n"
                 f"chunks={len(chunks)}\n"
                 f"answer_len={len(answer)}"
