@@ -5,7 +5,7 @@ vector:
     - major
     - career
     - campus
-  chunk_size: 800
+  chunk_size: 1200
   chunk_overlap: 150
   enable_ocr: true
   parser_preference:

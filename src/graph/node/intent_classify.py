@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from ...config.settings import HISTORY_LAST_K_TURNS
 from ..llm import ModelRequestTimeoutError, get_model
+from ..prompts.intent_classify import INTENT_PROMPT_TEMPLATE
 from ..state import WorkflowState
 from ..utils import (
     extract_query_from_state as shared_extract_query_from_state,
@@ -20,33 +21,13 @@ from ..utils import (
 
 logger = logging.getLogger(__name__)
 
-INTENT_PROMPT_TEMPLATE = """
-你是“南方科技大学研究生招生与培养助手”的领域相关性判断模块。
-
-【任务】
-判断当前用户问题是否属于以下范围：
-- 研究生招生：推免、统考、报名、复试、调剂、导师、招生专业、招生政策等；
-- 研究生培养与在校事务：培养方案、选课、奖助、学籍、学位、论文、答辩、毕业要求、学生管理等。
-
-【判定标准】
-- `in_scope = true`：问题与南科大研究生招生、培养或在校管理直接相关；或者问题虽表述简略，但结合上下文可合理判断为相关。
-- `in_scope = false`：问题明显与上述范围无关，例如本科招生、通用闲聊、与南科大研究生事务无关的社会常识、编程问题、娱乐话题等。
-
-【注意事项】
-- 你只判断“是否属于系统处理范围”，不要判断“是否容易回答”。
-- 若问题存在省略、代词或承接上一轮上下文的情况，要结合提供的对话历史理解。
-- 若无法完全确定，请优先判为 `in_scope = true`，交给后续检索与生成模块处理。
-
-【输出要求】
-严格输出 JSON，且只能包含以下字段：
-- `in_scope`: 布尔值
-- `reason`: 不超过 30 字的简短理由
-- `confidence`: 0 到 1 之间的浮点数
-""".strip()
-
 
 class ScopeClassificationResult(BaseModel):
     in_scope: bool = Field(..., description="whether the query is within SUSTech graduate scope")
+    reply_mode: Literal["hat", "expand"] = Field(
+        default="hat",
+        description="reply style mode inferred from conversation history",
+    )
     reason: str = Field(default="", description="short reason")
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
@@ -82,6 +63,10 @@ class GraduateIntentClassifier:
             raise ValueError("intent gate output is not a JSON object")
 
         in_scope = bool(data.get("in_scope", True))
+        reply_mode_raw = str(data.get("reply_mode", "hat")).strip().lower()
+        reply_mode: Literal["hat", "expand"] = (
+            "expand" if reply_mode_raw == "expand" else "hat"
+        )
         reason = str(data.get("reason", "")).strip()
         try:
             confidence = float(data.get("confidence", 1.0))
@@ -91,6 +76,7 @@ class GraduateIntentClassifier:
 
         return ScopeClassificationResult(
             in_scope=in_scope,
+            reply_mode=reply_mode,
             reason=reason,
             confidence=confidence,
         )
@@ -130,9 +116,11 @@ def create_intent_classify_node(*, model_id: str | None = None):
                 model_id=runtime_model_id,
             )
             in_scope = bool(result.in_scope)
+            reply_mode = result.reply_mode
             logger.debug(
                 "Intent gate classified.\n"
                 f"in_scope={in_scope}\n"
+                f"reply_mode={reply_mode}\n"
                 f"confidence={result.confidence:.2f}\n"
                 f"reason={result.reason}"
             )
@@ -140,6 +128,7 @@ def create_intent_classify_node(*, model_id: str | None = None):
             raise
         except Exception as exc:
             in_scope = True
+            reply_mode = "hat"
             logger.warning(
                 "Intent gate failed, default to in_scope.\n"
                 f"error={type(exc).__name__}: {exc}"
@@ -148,6 +137,7 @@ def create_intent_classify_node(*, model_id: str | None = None):
         return {
             "query": query,
             "in_scope": in_scope,
+            "reply_mode": reply_mode,
         }
 
     return intent_classify_node

@@ -12,7 +12,6 @@ import {
   DO_NOT_RENDER_ID_PREFIX,
   ensureToolCallsHaveResponses,
 } from "@/lib/ensure-tool-responses";
-import { LangGraphLogoSVG } from "../icons/langgraph";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import {
   ArrowDown,
@@ -26,15 +25,6 @@ import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { Label } from "../ui/label";
-import { Switch } from "../ui/switch";
-import { GitHubSVG } from "../icons/github";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../ui/tooltip";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -69,40 +59,16 @@ function ScrollToBottom(props: { className?: string }) {
       onClick={() => scrollToBottom()}
     >
       <ArrowDown className="w-4 h-4" />
-      <span>Scroll to bottom</span>
+      <span>回到底部</span>
     </Button>
   );
 }
 
-function OpenGitHubRepo() {
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <a
-            href="https://github.com/langchain-ai/agent-chat-ui"
-            target="_blank"
-            className="flex items-center justify-center"
-          >
-            <GitHubSVG width="24" height="24" />
-          </a>
-        </TooltipTrigger>
-        <TooltipContent side="left">
-          <p>Open GitHub repo</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
 
 export function Thread() {
   const [threadId, setThreadId] = useQueryState("threadId");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
-    parseAsBoolean.withDefault(false),
-  );
-  const [hideToolCalls, setHideToolCalls] = useQueryState(
-    "hideToolCalls",
     parseAsBoolean.withDefault(false),
   );
   const [input, setInput] = useState("");
@@ -208,7 +174,7 @@ export function Thread() {
     <div className="flex w-full h-screen overflow-hidden">
       <div className="relative lg:flex hidden">
         <motion.div
-          className="absolute h-full border-r bg-white overflow-hidden z-20"
+          className="absolute h-full border-r bg-background overflow-hidden z-20"
           style={{ width: 300 }}
           animate={
             isLargeScreen
@@ -252,7 +218,7 @@ export function Thread() {
             <div>
               {(!chatHistoryOpen || !isLargeScreen) && (
                 <Button
-                  className="hover:bg-gray-100"
+                  className="hover:bg-accent"
                   variant="ghost"
                   onClick={() => setChatHistoryOpen((p) => !p)}
                 >
@@ -264,9 +230,6 @@ export function Thread() {
                 </Button>
               )}
             </div>
-            <div className="absolute top-2 right-4 flex items-center">
-              <OpenGitHubRepo />
-            </div>
           </div>
         )}
         {chatStarted && (
@@ -275,7 +238,7 @@ export function Thread() {
               <div className="absolute left-0 z-10">
                 {(!chatHistoryOpen || !isLargeScreen) && (
                   <Button
-                    className="hover:bg-gray-100"
+                    className="hover:bg-accent"
                     variant="ghost"
                     onClick={() => setChatHistoryOpen((p) => !p)}
                   >
@@ -299,21 +262,17 @@ export function Thread() {
                   damping: 30,
                 }}
               >
-                <LangGraphLogoSVG width={32} height={32} />
-                <span className="text-xl font-semibold tracking-tight">
-                  Agent Chat
+                <span className="text-lg font-semibold tracking-tight text-foreground">
+                  研究生招生智能体
                 </span>
               </motion.button>
             </div>
 
             <div className="flex items-center gap-4">
-              <div className="flex items-center">
-                <OpenGitHubRepo />
-              </div>
               <TooltipIconButton
                 size="lg"
                 className="p-4"
-                tooltip="New thread"
+                tooltip="新对话"
                 variant="ghost"
                 onClick={() => setThreadId(null)}
               >
@@ -332,7 +291,7 @@ export function Thread() {
               !chatStarted && "flex flex-col items-stretch mt-[25vh]",
               chatStarted && "grid grid-rows-[1fr_auto]",
             )}
-            contentClassName="pt-8 pb-16  max-w-3xl mx-auto flex flex-col gap-4 w-full"
+            contentClassName="pt-8 pb-20 max-w-3xl mx-auto flex flex-col gap-5 w-full"
             content={
               <>
                 {messages
@@ -369,19 +328,21 @@ export function Thread() {
               </>
             }
             footer={
-              <div className="sticky flex flex-col items-center gap-8 bottom-0 bg-white">
+              <div className="sticky flex flex-col items-center gap-8 bottom-0 bg-background">
                 {!chatStarted && (
-                  <div className="flex gap-3 items-center">
-                    <LangGraphLogoSVG className="flex-shrink-0 h-8" />
-                    <h1 className="text-2xl font-semibold tracking-tight">
-                      Agent Chat
+                  <div className="flex flex-col items-center gap-2">
+                    <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                      研究生招生智能体
                     </h1>
+                    <p className="text-sm text-muted-foreground">
+                      南方科技大学 · 智能问答
+                    </p>
                   </div>
                 )}
 
                 <ScrollToBottom className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 animate-in fade-in-0 zoom-in-95" />
 
-                <div className="bg-muted rounded-2xl border shadow-xs mx-auto mb-8 w-full max-w-3xl relative z-10">
+                <div className="bg-white rounded-2xl border border-border/60 shadow-soft mx-auto mb-8 w-full max-w-3xl relative z-10">
                   <form
                     onSubmit={handleSubmit}
                     className="grid grid-rows-[1fr_auto] gap-2 max-w-3xl mx-auto"
@@ -402,26 +363,11 @@ export function Thread() {
                           form?.requestSubmit();
                         }
                       }}
-                      placeholder="Type your message..."
+                      placeholder="请输入您的问题..."
                       className="p-3.5 pb-0 border-none bg-transparent field-sizing-content shadow-none ring-0 outline-none focus:outline-none focus:ring-0 resize-none"
                     />
 
-                    <div className="flex items-center justify-between p-2 pt-4">
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <Switch
-                            id="render-tool-calls"
-                            checked={hideToolCalls ?? false}
-                            onCheckedChange={setHideToolCalls}
-                          />
-                          <Label
-                            htmlFor="render-tool-calls"
-                            className="text-sm text-gray-600"
-                          >
-                            Hide Tool Calls
-                          </Label>
-                        </div>
-                      </div>
+                    <div className="flex items-center justify-end p-2 pt-4">
                       {stream.isLoading ? (
                         <Button key="stop" onClick={() => stream.stop()}>
                           <LoaderCircle className="w-4 h-4 animate-spin" />
@@ -433,7 +379,7 @@ export function Thread() {
                           className="transition-all shadow-md"
                           disabled={isLoading || !input.trim()}
                         >
-                          Send
+                          发送
                         </Button>
                       )}
                     </div>

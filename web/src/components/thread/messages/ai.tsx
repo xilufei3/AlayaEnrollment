@@ -78,7 +78,7 @@ export function AssistantMessage({
   const contentString = getContentString(content);
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
-    parseAsBoolean.withDefault(false),
+    parseAsBoolean.withDefault(true),
   );
 
   const thread = useStreamContext();
@@ -119,7 +119,7 @@ export function AssistantMessage({
       ) : (
         <div className="flex flex-col gap-2">
           {contentString.length > 0 && (
-            <div className="py-1">
+            <div className="py-2.5 px-4 bg-white rounded-2xl shadow-message border border-border/40">
               <MarkdownText>{contentString}</MarkdownText>
             </div>
           )}
@@ -174,7 +174,7 @@ export function AssistantMessage({
 export function AssistantMessageLoading() {
   return (
     <div className="flex items-start mr-auto gap-2">
-      <div className="flex items-center gap-1 rounded-2xl bg-muted px-4 py-2 h-8">
+      <div className="flex items-center gap-1 rounded-2xl bg-white border border-border/40 shadow-message px-4 py-2 h-8">
         <div className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-[pulse_1.5s_ease-in-out_infinite]"></div>
         <div className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-[pulse_1.5s_ease-in-out_0.5s_infinite]"></div>
         <div className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-[pulse_1.5s_ease-in-out_1s_infinite]"></div>

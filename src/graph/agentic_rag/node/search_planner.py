@@ -6,41 +6,18 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from langchain_core.documents import Document
+
 from ...llm import ModelRequestTimeoutError, get_model
+from ...prompts.search_planner import (
+    SEARCH_PLANNER_SYSTEM,
+    build_search_planner_user_prompt,
+)
 from ..schemas import RAGState, SearchPlan
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TOP_K = 8
-
-SEARCH_PLANNER_SYSTEM = """
-你是“南方科技大学研究生招生与培养助手”的检索规划模块。
-
-【目标】
-根据用户问题，为后续知识检索生成更稳定、召回率更高的检索查询。
-
-【你的任务】
-1. 重写主查询：
-   - 保留用户真实意图、关键实体、时间范围和限定条件；
-   - 补全口语、省略和代词，使查询更适合向量检索；
-   - 不要凭空新增用户未提及的事实。
-2. 拆分子问题：
-   - 若用户一次问了多个独立问题，拆成若干可以分别检索的子问题；
-   - 若只是一个问题，返回仅包含主查询的单元素列表。
-3. 重试策略：
-   - 若提供了上一轮评估理由，优先根据该理由调整查询粒度；
-   - 当上一轮信息不足时，优先做“适度泛化”而不是机械重复原问题。
-
-【输出要求】
-严格输出 JSON，且只允许包含以下字段：
-- `rewritten_query`: 字符串，主检索查询
-- `sub_queries`: 字符串数组，子问题列表，至少包含主查询
-- `reason`: 字符串，简要说明本次改写/拆分思路，不超过 50 字
-
-【约束】
-- 不要输出任何 JSON 之外的内容。
-- 不要生成与南科大研究生语境无关的泛化检索词。
-""".strip()
 
 
 class SearchPlanLLMOutput(BaseModel):
@@ -78,21 +55,41 @@ def _build_plan_rule(
     }
 
 
+def _candidates_summary(
+    candidates: list[Document],
+    max_chars: int = 3000,
+) -> str:
+    """将已有 candidate chunks 摘要为文本，供 search planner 参考。"""
+    if not candidates:
+        return ""
+    lines: list[str] = []
+    total = 0
+    for i, doc in enumerate(candidates, start=1):
+        text = doc.page_content.strip()[:200]
+        lines.append(f"[{i}] {text}")
+        total += len(text)
+        if total >= max_chars:
+            break
+    return "\n".join(lines)
+
+
 async def _llm_plan(
     model_id: str,
     query: str,
+    reply_mode: str,
     iteration: int,
     eval_reason: str,
+    candidates: list[Document] | None = None,
 ) -> SearchPlan:
     model = get_model(model_id)
-    user_parts = [
-        f"【用户问题】\n{query}",
-        f"【当前检索轮次】\n{iteration}",
-    ]
-    if eval_reason.strip():
-        user_parts.append(f"【上一轮评估理由】\n{eval_reason.strip()}")
-    user_parts.append("请输出检索规划 JSON。")
-    user_prompt = "\n".join(user_parts)
+    candidates_text = _candidates_summary(candidates or [])
+    user_prompt = build_search_planner_user_prompt(
+        query=query,
+        reply_mode=reply_mode,
+        iteration=iteration,
+        eval_reason=eval_reason,
+        candidates_text=candidates_text,
+    )
 
     response = await model.ainvoke(
         [("system", SEARCH_PLANNER_SYSTEM), ("user", user_prompt)],
@@ -128,6 +125,7 @@ async def _llm_plan(
     logger.debug(
         "SearchPlanner LLM done.\n"
         f"rewritten_query={out.rewritten_query[:60]}...\n"
+        f"reply_mode={reply_mode}\n"
         f"top_k={top_k_final}\n"
         f"reason={out.reason}"
     )
@@ -137,8 +135,12 @@ async def _llm_plan(
 def create_search_planner_node(*, model_id: str | None = None):
     async def search_planner_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
+        reply_mode = str(state.get("reply_mode") or "hat").strip().lower()
+        if reply_mode not in {"hat", "expand"}:
+            reply_mode = "hat"
         iteration = int(state.get("rag_iteration") or 0)
         eval_reason = str(state.get("eval_reason") or "")
+        candidates = list(state.get("candidate_vector_chunks") or [])
 
         planner_model_kind = model_id or "planner"
 
@@ -147,8 +149,10 @@ def create_search_planner_node(*, model_id: str | None = None):
                 plan = await _llm_plan(
                     model_id=planner_model_kind,
                     query=query,
+                    reply_mode=reply_mode,
                     iteration=iteration,
                     eval_reason=eval_reason,
+                    candidates=candidates,
                 )
             except ModelRequestTimeoutError:
                 raise
@@ -164,6 +168,7 @@ def create_search_planner_node(*, model_id: str | None = None):
         logger.debug(
             "SearchPlanner done.\n"
             f"iteration={iteration}\n"
+            f"reply_mode={reply_mode}\n"
             f"strategy={plan.get('strategy')}\n"
             f"vector_query={plan.get('vector_query', '')[:60]}\n"
             f"top_k={plan.get('top_k')}"

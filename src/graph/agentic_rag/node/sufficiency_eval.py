@@ -7,36 +7,17 @@ from typing import Any
 from langchain_core.documents import Document
 
 from ...llm import ModelRequestTimeoutError, get_model
+from ...prompts.sufficiency_eval import (
+    SUFFICIENCY_EVAL_SYSTEM_PROMPT,
+    build_sufficiency_eval_user_prompt,
+)
 from ..schemas import RAGState
 
 logger = logging.getLogger(__name__)
 
-SUFFICIENCY_EVAL_SYSTEM_PROMPT = """
-你是“南方科技大学研究生招生与培养助手”的检索充分性评估模块。
-
-【任务】
-根据用户问题和当前检索到的文档摘要，判断这些材料是否足以支撑生成阶段给出可靠回答。
-
-【判定标准】
-- `sufficient`：
-  - 文档与问题主题高度相关；
-  - 能覆盖用户问题的核心诉求，或至少足以支持安全、明确的答复；
-  - 对流程、条件、政策解释类问题，已有足够依据说明关键步骤或关键限制。
-- `insufficient_docs`：
-  - 文档为空；
-  - 文档与问题相关性弱；
-  - 文档只覆盖了边缘信息，无法支撑回答核心问题；
-  - 用户问题包含多个重点，但当前文档无法覆盖主要部分。
-
-【输出要求】
-严格输出 JSON，且只包含：
-- `eval_result`: `"sufficient"` 或 `"insufficient_docs"`
-- `reason`: 不超过 50 字的简短理由
-
-【注意】
-- 评估的是“是否足以支撑回答”，不是“是否与问题略有相关”。
-- 不要输出任何 JSON 之外的内容。
-""".strip()
+# Reranker relevance_score 低于此阈值的 chunk 不会被累积到 candidate 池
+_RELEVANCE_SCORE_THRESHOLD = 0.3
+_MAX_CANDIDATE_CHUNKS = 25
 
 
 def _chunk_summary(chunks: list[Document], max_chars: int = 6000) -> str:
@@ -51,6 +32,52 @@ def _chunk_summary(chunks: list[Document], max_chars: int = 6000) -> str:
         if total >= max_chars:
             break
     return "\n".join(lines)
+
+
+def _doc_key(doc: Document) -> tuple[str, str]:
+    """Stable dedup key: prefer metadata id, fallback to content."""
+    doc_id = str(doc.metadata.get("id", "")).strip()
+    if doc_id:
+        return ("id", doc_id)
+    return ("content", doc.page_content)
+
+
+def _filter_high_relevance(
+    chunks: list[Document],
+    threshold: float = _RELEVANCE_SCORE_THRESHOLD,
+) -> list[Document]:
+    """保留 reranker relevance_score >= threshold 的 chunk。"""
+    result: list[Document] = []
+    for doc in chunks:
+        score = doc.metadata.get("relevance_score")
+        if score is None:
+            # 没有 score 的 chunk（如未经过 reranker）全部保留
+            result.append(doc)
+        elif float(score) >= threshold:
+            result.append(doc)
+    return result
+
+
+def _merge_candidates(
+    existing: list[Document],
+    incoming: list[Document],
+    *,
+    limit: int = _MAX_CANDIDATE_CHUNKS,
+) -> list[Document]:
+    """将新的高质量 chunk 合并到已有候选池，按 id/content 去重。"""
+    merged: list[Document] = []
+    seen: set[tuple[str, str]] = set()
+
+    for doc in [*existing, *incoming]:
+        key = _doc_key(doc)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(doc)
+        if len(merged) >= limit:
+            break
+
+    return merged
 
 
 class SufficiencyEvaluator:
@@ -90,10 +117,8 @@ class SufficiencyEvaluator:
         chunks: list[Document],
     ) -> dict[str, Any]:
         model = get_model(self.model_id)
-        user_prompt = (
-            f"用户问题：{query}\n"
-            f"可用材料摘要：\n{_chunk_summary(chunks)}\n"
-            "请评估这些材料是否足以直接回答用户。"
+        user_prompt = build_sufficiency_eval_user_prompt(
+            query=query, chunk_summary=_chunk_summary(chunks),
         )
         response = await model.ainvoke(
             [("system", SUFFICIENCY_EVAL_SYSTEM_PROMPT), ("user", user_prompt)],
@@ -127,29 +152,42 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
 
     async def sufficiency_eval_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
-        chunks = list(state.get("chunks") or [])
+        reranked_chunks = list(state.get("reranked_vector_chunks") or [])
+        existing_candidates = list(state.get("candidate_vector_chunks") or [])
         iteration = int(state.get("rag_iteration") or 0)
         max_iter = int(state.get("max_iterations") or 2)
+
+        # ── 按 rerank score 过滤，累积到 candidate 池 ──
+        high_relevance = _filter_high_relevance(reranked_chunks)
+        candidates = _merge_candidates(existing_candidates, high_relevance)
+
+        logger.debug(
+            f"SufficiencyEval: reranked={len(reranked_chunks)} "
+            f"high_relevance={len(high_relevance)} "
+            f"candidates_total={len(candidates)}"
+        )
 
         # 已达到最大迭代次数：强制 sufficient（生成节点处理空文档）
         if iteration > max_iter:
             logger.debug(f"SufficiencyEval: max_iterations reached ({iteration} > {max_iter}), force sufficient.")
             return {
+                "candidate_vector_chunks": candidates,
+                "chunks": candidates,
                 "eval_result": "sufficient",
                 "eval_reason": "max_iterations reached",
             }
 
-        result = await evaluator.evaluate(
-            query=query,
-            chunks=chunks,
-        )
+        # ── 用累积的 candidates 评估充分性 ──
+        result = await evaluator.evaluate(query=query, chunks=candidates)
         logger.debug(
             "SufficiencyEval done.\n"
-            f"chunks={len(chunks)}\n"
+            f"candidates={len(candidates)}\n"
             f"eval_result={result['eval_result']}\n"
             f"reason={result['eval_reason']}"
         )
         return {
+            "candidate_vector_chunks": candidates,
+            "chunks": candidates,
             "eval_result": result["eval_result"],
             "eval_reason": result["eval_reason"],
         }

@@ -40,6 +40,7 @@ class SQLPlan(TypedDict, total=False):
 class RAGState(TypedDict, total=False):
     # Inputs from WorkflowState
     query: Annotated[str, _overwrite]
+    reply_mode: Annotated[str, _overwrite]
     intent: Annotated[str, _overwrite]
     slots: Annotated[dict[str, str], _overwrite]
     required_slots: Annotated[list[str], _overwrite]

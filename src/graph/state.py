@@ -15,6 +15,7 @@ class WorkflowState(TypedDict, total=False):
 
     query: str
     in_scope: bool
+    reply_mode: str
 
     # Retrieval + generation
     chunks: list[Document]

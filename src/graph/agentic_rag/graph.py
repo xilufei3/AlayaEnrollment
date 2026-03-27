@@ -78,6 +78,7 @@ def create_agentic_rag_node(
     async def agentic_rag_node(state: Any) -> dict[str, Any]:
         rag_input: RAGState = {
             "query": str(state.get("query") or "").strip(),
+            "reply_mode": str(state.get("reply_mode") or "hat").strip() or "hat",
             "intent": str(state.get("intent") or "").strip(),
             "slots": dict(state.get("slots") or {}),
             "required_slots": list(state.get("required_slots") or []),
