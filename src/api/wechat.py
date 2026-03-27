@@ -116,7 +116,11 @@ async def _run_ai(openid: str, message: str, entry: dict[str, Any]) -> None:
     runtime: AdmissionGraphRuntime = entry["runtime"]
     try:
         answer = ""
-        async for evt in runtime.stream_stage_events(session_id=openid, message=message):
+        async for evt in runtime.stream_stage_events(
+            session_id=openid,
+            message=message,
+            channel="wechat",
+        ):
             if evt.get("event") == "message.completed":
                 answer = evt.get("data", {}).get("answer", "")
                 break

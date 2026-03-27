@@ -14,6 +14,7 @@ class WorkflowState(TypedDict, total=False):
     thread_id: str
     turn_id: str
     messages: Annotated[list[BaseMessage], add_messages]
+    channel: str
 
     query: str
     intent: str

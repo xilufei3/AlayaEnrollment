@@ -40,7 +40,7 @@ def test_generation_prompt_distinguishes_broad_and_narrow_questions():
     factual_prompt = build_generation_system_prompt("school_overview", "factual_query", has_context=True)
 
     assert "## 作答结构：介绍型" in intro_prompt
-    assert "开头 1-2 句给出整体印象或总述。" in intro_prompt
+    assert "从参考材料中选取与问题直接相关的维度分点展开" in intro_prompt
     assert "## 作答结构：事实查询型" in factual_prompt
     assert "开头直接给出核心事实，无须铺垫。" in factual_prompt
 

@@ -76,6 +76,7 @@ services:
       - "0.0.0.0:8008:8008"
     volumes:
       - ./data:/app/data
+      - ./datas:/app/datas
       - ./.runtime:/app/.runtime
     depends_on:
       milvus:

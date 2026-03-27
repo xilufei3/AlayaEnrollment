@@ -914,21 +914,30 @@ class AdmissionGraphRuntime:
 
         return run_id, _iter()
 
-    def stream_stage_events(self, *, session_id: str, message: str) -> AsyncIterator[dict[str, Any]]:
+    def stream_stage_events(
+        self,
+        *,
+        session_id: str,
+        message: str,
+        channel: str | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
         if self._graph is None:
             raise RuntimeError("Runtime not started")
 
         config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
         lf_handler = None
         lf_trace_context = nullcontext()
+        metadata = {"session_id": session_id, "source": "chat_stream"}
+        if channel:
+            metadata["channel"] = channel
         if _langfuse_enabled():
             lf_handler = _build_langfuse_handler(
                 session_id=session_id,
-                metadata={"session_id": session_id, "source": "chat_stream"},
+                metadata=metadata,
             )
             lf_trace_context = _build_langfuse_propagation_context(
                 session_id=session_id,
-                metadata={"session_id": session_id, "source": "chat_stream"},
+                metadata=metadata,
                 tags=["chat_stream"],
                 trace_name=f"chat-stream:{session_id}",
             )
@@ -949,6 +958,8 @@ class AdmissionGraphRuntime:
                 "query": message,
                 "messages": [HumanMessage(content=message)],
             }
+            if channel:
+                initial_state["channel"] = channel
             try:
                 with lf_trace_context:
                     async for update in self._graph.astream(initial_state, config=config, stream_mode="updates"):

@@ -254,6 +254,29 @@ sudo systemctl start alaya-backend
 | 安全响应头 | X-Frame-Options / X-Content-Type-Options / Referrer-Policy |
 | Gzip 压缩 | 压缩前端资源（不压缩 SSE） |
 
+### 为公众号/小程序提供独立前缀（可选）
+
+如果需要让微信公众号或小程序通过 `https://域名/zs-wx-ai/...` 访问后端接口，同时保留 Web 端原有的 `/zs-test`，可以在 `infra/nginx/alaya-enrollment.conf` 的 `server` 块中追加：
+
+```nginx
+location /zs-wx-ai/ {
+    rewrite ^/zs-wx-ai(/.*)$ $1 break;
+    proxy_pass http://backend:8008;   # 若希望继续走 Next.js BFF，可改为 http://app_upstream
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+}
+location = /zs-wx-ai {
+    return 301 /zs-wx-ai/;
+}
+```
+
+再在微信公众号后台的“服务器配置”里填写 `https://域名/zs-wx-ai/wx` 即可：Nginx 会剥掉前缀并把请求转发给 FastAPI（或 Next.js）。这样 Web 与公众号可使用不同的路径前缀而无需额外部署一套代码。
+
 ### 启用 HTTPS
 
 `infra/nginx/alaya-enrollment.conf` 底部有注释版 HTTPS 模板。步骤：

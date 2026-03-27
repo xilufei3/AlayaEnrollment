@@ -9,7 +9,7 @@ dotenv.config({
   path: path.resolve(webDir, "../.env"),
 });
 
-const BASE_PATH = "/zs-t";
+const BASE_PATH = "/zs-ai";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

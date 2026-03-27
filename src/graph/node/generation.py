@@ -16,6 +16,7 @@ from langgraph.runtime import Runtime
 from ...config.settings import HISTORY_LAST_K_TURNS
 from ..llm import ModelRequestTimeoutError, get_model
 from ..prompts.generation import (
+    WECHAT_SYSTEM_SUFFIX,
     build_generation_system_prompt,
     build_generation_user_prompt,
 )
@@ -261,6 +262,9 @@ def create_generation_node(*, model_id: str | None = None):
                 max_turns=HISTORY_LAST_K_TURNS,
             )
 
+            channel = str(state.get("channel") or "").strip().lower()
+            system_suffix = WECHAT_SYSTEM_SUFFIX if channel == "wechat" else ""
+
             answer = await component.generate(
                 query=query,
                 intent=intent,
@@ -269,6 +273,7 @@ def create_generation_node(*, model_id: str | None = None):
                 structured_results=list(state.get("structured_results") or []),
                 messages=messages_for_history,
                 model_id=runtime_model_id,
+                system_suffix=system_suffix,
             )
             logger.debug(
                 "Generation done.\n"
