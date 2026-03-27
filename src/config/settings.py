@@ -218,9 +218,27 @@ HISTORY_LAST_K_TURNS: int = 4
 
 @dataclass
 class LLMConfig:
-    api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
-    base_url: str = field(default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
-    model: str = "deepseek-chat"
+    api_key: str = field(
+        default_factory=lambda: os.getenv(
+            "QWEN_API_KEY",
+            os.getenv("DEEPSEEK_API_KEY", ""),
+        ).strip()
+    )
+    base_url: str = field(
+        default_factory=lambda: os.getenv(
+            "QWEN_BASE_URL",
+            os.getenv(
+                "DEEPSEEK_BASE_URL",
+                "https://star.sustech.edu.cn/service/model/qwen/v1",
+            ),
+        ).strip()
+    )
+    model: str = field(
+        default_factory=lambda: os.getenv(
+            "QWEN_MODEL_NAME",
+            os.getenv("DEEPSEEK_MODEL_NAME", "qwen3.5-397b-a17b-fp8"),
+        ).strip()
+    )
     temperature: float = 0.0
     max_tokens: int = 1024
 

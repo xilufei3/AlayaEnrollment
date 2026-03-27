@@ -31,8 +31,8 @@ def _record_llm_err(model_kind: str, duration: float) -> None:
 
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 DEFAULT_DEEPSEEK_MODEL_NAME = "deepseek-chat"
-DEFAULT_QWEN_BASE_URL = DEFAULT_DEEPSEEK_BASE_URL
-DEFAULT_QWEN_MODEL_NAME = DEFAULT_DEEPSEEK_MODEL_NAME
+DEFAULT_QWEN_BASE_URL = "https://star.sustech.edu.cn/service/model/qwen/v1"
+DEFAULT_QWEN_MODEL_NAME = "qwen3.5-397b-a17b-fp8"
 DEFAULT_JINA_MODEL_NAME = "jina-reranker-v3"
 DEFAULT_MODEL_KIND = "generation"
 DEFAULT_INTENT_REQUEST_TIMEOUT = 8.0
@@ -47,7 +47,7 @@ DEFAULT_EVAL_MAX_RETRIES = 0
 DEFAULT_RERANK_MAX_RETRIES = 0
 
 DISABLE_THINKING_EXTRA_BODY: dict[str, Any] = {
-    "chat_template_kwargs": {"enable_thinking": False},
+    "enable_thinking": False,
 }
 
 MODEL_KIND_ALIASES: dict[str, str] = {
