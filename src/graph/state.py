@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, TypedDict
 
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage
@@ -14,18 +14,10 @@ class WorkflowState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
 
     query: str
-    intent: str
-    confidence: float
-
-    # Global slot memory + turn-specific slot needs
-    slots: dict[str, str]
-    required_slots: list[str]
-    missing_slots: list[str]
+    in_scope: bool
 
     # Retrieval + generation
     chunks: list[Document]
-    structured_results: list[dict[str, Any]]
     citations: list[dict[str, str]]
-    retrieval_skipped: bool
 
     answer: str

@@ -67,17 +67,15 @@ def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
 
     async def retrieval_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
-        intent = str(state.get("intent") or "").strip()
         plan: SearchPlan = state.get("search_plan") or {}
         retrieval_query = str(plan.get("vector_query") or "").strip() or query
 
         if not retrieval_query:
             logger.debug(
                 "Retrieval skipped.\n"
-                f"query_empty={not retrieval_query}\n"
-                f"intent={intent}"
+                f"query_empty={not retrieval_query}"
             )
-            return {"vector_chunks": []}
+            return {"vector_chunks": [], "chunks": []}
 
         plan_top_k = int(plan.get("top_k") or top_k)
         search_mode = _resolve_search_mode(plan)
@@ -109,6 +107,7 @@ def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
         docs = _deduplicate(docs)
         return {
             "vector_chunks": docs,
+            "chunks": docs,
         }
 
     return retrieval_node

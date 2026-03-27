@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { useThreads } from "@/providers/Thread";
 import { Thread } from "@langchain/langgraph-sdk";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
@@ -14,9 +14,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { PanelRightOpen, PanelRightClose } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { BRAND_COPY } from "../branding";
-import { SustechMark } from "@/components/icons/sustech-mark";
-import { cn } from "@/lib/utils";
 import { mergeThreadLists } from "@/providers/thread-list";
 
 function ThreadList({
@@ -31,7 +28,6 @@ function ThreadList({
   return (
     <div className="h-full flex flex-col w-full gap-2 items-start justify-start overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
       {threads.map((t) => {
-        const isActive = t.thread_id === threadId;
         let itemText = t.thread_id;
         if (
           typeof t.values === "object" &&
@@ -47,12 +43,7 @@ function ThreadList({
           <div key={t.thread_id} className="w-full px-1">
             <Button
               variant="ghost"
-              className={cn(
-                "h-auto w-full justify-start rounded-[1.4rem] px-4 py-4 text-left font-normal transition-all",
-                isActive
-                  ? "bg-primary text-primary-foreground shadow-[0_14px_30px_rgba(24,72,71,0.18)] hover:bg-primary/95"
-                  : "bg-white/45 text-foreground hover:bg-white/80",
-              )}
+              className="text-left items-start justify-start font-normal w-[280px]"
               onClick={(e) => {
                 e.preventDefault();
                 onThreadClick?.(t.thread_id);
@@ -60,21 +51,7 @@ function ThreadList({
                 setThreadId(t.thread_id);
               }}
             >
-              <div className="flex w-full flex-col items-start gap-1">
-                <p className="w-full truncate text-sm font-medium">
-                  {itemText}
-                </p>
-                <p
-                  className={cn(
-                    "text-xs",
-                    isActive
-                      ? "text-primary-foreground/75"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  点击继续查看本次咨询
-                </p>
-              </div>
+              <p className="truncate text-ellipsis">{itemText}</p>
             </Button>
           </div>
         );
@@ -85,12 +62,9 @@ function ThreadList({
 
 function ThreadHistoryLoading() {
   return (
-    <div className="h-full flex w-full flex-col items-start justify-start gap-2 overflow-y-scroll pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/20 [&::-webkit-scrollbar-track]:bg-transparent">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <Skeleton
-          key={`skeleton-${i}`}
-          className="h-[4.5rem] w-full rounded-[1.4rem] bg-white/60"
-        />
+    <div className="h-full flex flex-col w-full gap-2 items-start justify-start overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
+      {Array.from({ length: 30 }).map((_, i) => (
+        <Skeleton key={`skeleton-${i}`} className="w-[280px] h-10" />
       ))}
     </div>
   );
@@ -103,8 +77,15 @@ export default function ThreadHistory() {
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
-  const { getThreads, getThread, threads, setThreads, threadsLoading, setThreadsLoading } =
-    useThreads();
+
+  const {
+    getThreads,
+    getThread,
+    threads,
+    setThreads,
+    threadsLoading,
+    setThreadsLoading,
+  } = useThreads();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -164,21 +145,10 @@ export default function ThreadHistory() {
 
   return (
     <>
-      <div className="surface-glass hidden h-screen w-[320px] shrink-0 flex-col items-start justify-start gap-6 border-r border-white/55 px-4 pb-5 pt-4 shadow-inner-right lg:flex">
-        <div className="flex w-full items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <SustechMark className="h-11 w-11" />
-            <div>
-              <p className="text-[11px] font-medium tracking-[0.18em] text-primary/72">
-                SUSTech Admissions
-              </p>
-              <h1 className="mt-1 text-sm font-medium text-foreground">
-                {BRAND_COPY.historyTitle}
-              </h1>
-            </div>
-          </div>
+      <div className="hidden lg:flex flex-col border-r-[1px] border-slate-300 items-start justify-start gap-6 h-screen w-[300px] shrink-0 shadow-inner-right">
+        <div className="flex items-center justify-between w-full pt-1.5 px-4">
           <Button
-            className="rounded-full hover:bg-white/75"
+            className="hover:bg-gray-100"
             variant="ghost"
             onClick={() => setChatHistoryOpen((p) => !p)}
           >
@@ -188,6 +158,9 @@ export default function ThreadHistory() {
               <PanelRightClose className="size-5" />
             )}
           </Button>
+          <h1 className="text-xl font-semibold tracking-tight">
+            Thread History
+          </h1>
         </div>
         {threadsLoading ? (
           <ThreadHistoryLoading />
@@ -203,11 +176,9 @@ export default function ThreadHistory() {
             setChatHistoryOpen(open);
           }}
         >
-          <SheetContent side="left" className="surface-glass flex border-white/70 lg:hidden">
+          <SheetContent side="left" className="lg:hidden flex">
             <SheetHeader>
-              <SheetTitle className="text-sm font-medium text-foreground">
-                {BRAND_COPY.historyTitle}
-              </SheetTitle>
+              <SheetTitle>Thread History</SheetTitle>
             </SheetHeader>
             <ThreadList
               threads={threads}

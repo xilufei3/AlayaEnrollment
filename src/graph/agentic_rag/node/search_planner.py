@@ -6,48 +6,62 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ....knowledge import SQLManager
 from ...llm import ModelRequestTimeoutError, get_model
-from ...prompts import SEARCH_PLANNER_SYSTEM_PROMPT
-from ...utils import (
-    chunk_texts as shared_chunk_texts,
-    query_prefers_year_range as shared_query_prefers_year_range,
-)
-from ..schemas import RAGState, SQLCandidate, SQLPlan, SearchPlan
+from ..schemas import RAGState, SearchPlan
 
 logger = logging.getLogger(__name__)
 
-_INTENT_TOP_K: dict[str, int] = {
-    "admission_policy": 10,
-    "school_overview": 6,
-    "major_and_training": 8,
-    "career_and_development": 6,
-    "campus_life": 6,
-}
 _DEFAULT_TOP_K = 8
-_DEFAULT_SQL_LIMIT = 6
+
+SEARCH_PLANNER_SYSTEM = """
+你是“南方科技大学研究生招生与培养助手”的检索规划模块。
+
+【目标】
+根据用户问题，为后续知识检索生成更稳定、召回率更高的检索查询。
+
+【你的任务】
+1. 重写主查询：
+   - 保留用户真实意图、关键实体、时间范围和限定条件；
+   - 补全口语、省略和代词，使查询更适合向量检索；
+   - 不要凭空新增用户未提及的事实。
+2. 拆分子问题：
+   - 若用户一次问了多个独立问题，拆成若干可以分别检索的子问题；
+   - 若只是一个问题，返回仅包含主查询的单元素列表。
+3. 重试策略：
+   - 若提供了上一轮评估理由，优先根据该理由调整查询粒度；
+   - 当上一轮信息不足时，优先做“适度泛化”而不是机械重复原问题。
+
+【输出要求】
+严格输出 JSON，且只允许包含以下字段：
+- `rewritten_query`: 字符串，主检索查询
+- `sub_queries`: 字符串数组，子问题列表，至少包含主查询
+- `reason`: 字符串，简要说明本次改写/拆分思路，不超过 50 字
+
+【约束】
+- 不要输出任何 JSON 之外的内容。
+- 不要生成与南科大研究生语境无关的泛化检索词。
+""".strip()
 
 
 class SearchPlanLLMOutput(BaseModel):
-    rewritten_query: str = Field(default="", description="Main rewritten retrieval query")
-    reason: str = Field(default="", description="Planner reason")
-    sql_candidate: dict[str, Any] = Field(default_factory=dict, description="SQL routing candidate")
+    rewritten_query: str = Field(..., description="改写后的主查询")
+    sub_queries: list[str] = Field(default_factory=list, description="子问题列表")
+    reason: str = Field(default="", description="规划理由")
 
 
-def _get_top_k(intent: str, iteration: int) -> int:
-    top_k = _INTENT_TOP_K.get(intent, _DEFAULT_TOP_K)
+def _get_top_k(iteration: int) -> int:
+    top_k = _DEFAULT_TOP_K
     if iteration >= 1:
         top_k = min(top_k + 4, 16)
     return top_k
 
 
 def _build_plan_rule(
-    intent: str,
     iteration: int,
     eval_reason: str,
     query: str,
 ) -> SearchPlan:
-    top_k = _get_top_k(intent, iteration)
+    top_k = _get_top_k(iteration)
 
     if iteration > 0:
         logger.debug(
@@ -64,114 +78,24 @@ def _build_plan_rule(
     }
 
 
-def _default_sql_candidate() -> SQLCandidate:
-    return {
-        "enabled": False,
-        "selected_tables": [],
-        "reason": "sql disabled by default",
-    }
-
-
-def _default_sql_plan() -> SQLPlan:
-    return {
-        "enabled": False,
-        "table_plans": [],
-        "limit": _DEFAULT_SQL_LIMIT,
-        "reason": "sql_plan_builder not run",
-    }
-
-
-def _query_prefers_year_range(query: str) -> bool:
-    return shared_query_prefers_year_range(query)
-
-
-def _mask_slots_for_query(query: str, slots: dict[str, str]) -> dict[str, str]:
-    effective_slots = dict(slots)
-    if _query_prefers_year_range(query):
-        effective_slots.pop("year", None)
-    return effective_slots
-
-
-def _chunk_texts(chunks: list[Any]) -> list[str]:
-    return shared_chunk_texts(chunks)
-
-
-def _build_sql_registry_context() -> str:
-    try:
-        tables = SQLManager().get_all_table_meta()
-    except Exception as exc:
-        logger.warning("SearchPlanner: failed to load SQL registry context. %s", exc)
-        return "{}"
-
-    summary: dict[str, Any] = {}
-    for table_name, meta in tables.items():
-        columns = dict(meta.get("columns") or {})
-        summary[table_name] = {
-            "description": str(meta.get("description", "")).strip(),
-            "use_when": [
-                str(item).strip()
-                for item in list(meta.get("use_when") or [])
-                if str(item).strip()
-            ],
-            "query_key": [
-                str(item).strip()
-                for item in list(meta.get("query_key") or [])
-                if str(item).strip()
-            ],
-            "columns": {
-                str(key): str(value).strip()
-                for key, value in columns.items()
-                if str(key).strip()
-            },
-        }
-    return json.dumps(summary, ensure_ascii=False, sort_keys=True)
-
-
-def _normalize_sql_candidate(data: Any) -> SQLCandidate:
-    if not isinstance(data, dict):
-        return _default_sql_candidate()
-
-    selected_tables: list[str] = []
-    for item in list(data.get("selected_tables") or []):
-        table_name = str(item).strip()
-        if table_name:
-            selected_tables.append(table_name)
-
-    enabled = bool(data.get("enabled")) and bool(selected_tables)
-    return {
-        "enabled": enabled,
-        "selected_tables": selected_tables,
-        "reason": str(data.get("reason", "")).strip(),
-    }
-
-
 async def _llm_plan(
     model_id: str,
     query: str,
-    intent: str,
-    slots: dict[str, str],
     iteration: int,
     eval_reason: str,
-    chunks: list[Any] | None = None,
-) -> tuple[SearchPlan, SQLCandidate]:
+) -> SearchPlan:
     model = get_model(model_id)
     user_parts = [
-        f"用户问题：{query}",
-        f"意图：{intent}",
-        f"已知信息：{json.dumps(slots, ensure_ascii=False)}",
-        f"当前检索轮次：{iteration}",
-        f"SQL 表能力摘要：{_build_sql_registry_context()}",
+        f"【用户问题】\n{query}",
+        f"【当前检索轮次】\n{iteration}",
     ]
     if eval_reason.strip():
-        user_parts.append(f"上一轮评估理由：{eval_reason.strip()}")
-    chunk_texts = _chunk_texts(list(chunks or []))
-    if chunk_texts:
-        user_parts.append("上一轮召回 chunk 原文：\n" + "\n".join(chunk_texts))
-    user_parts.append("请输出检索参数 JSON。")
+        user_parts.append(f"【上一轮评估理由】\n{eval_reason.strip()}")
+    user_parts.append("请输出检索规划 JSON。")
     user_prompt = "\n".join(user_parts)
 
     response = await model.ainvoke(
-        [("system", SEARCH_PLANNER_SYSTEM_PROMPT), ("user", user_prompt)],
+        [("system", SEARCH_PLANNER_SYSTEM), ("user", user_prompt)],
         response_format={"type": "json_object"},
     )
     content = getattr(response, "content", response)
@@ -189,49 +113,42 @@ async def _llm_plan(
 
     out = SearchPlanLLMOutput(
         rewritten_query=str(data.get("rewritten_query", query)).strip() or query,
+        sub_queries=list(data.get("sub_queries") or []),
         reason=str(data.get("reason", "")).strip(),
-        sql_candidate=dict(data.get("sql_candidate") or {}),
     )
-    top_k_final = _get_top_k(intent, iteration)
+    top_k_final = _get_top_k(iteration)
+    sub_queries_final = out.sub_queries if out.sub_queries else [out.rewritten_query]
 
     plan: SearchPlan = {
         "strategy": "vector_keyword_hybrid",
         "vector_query": out.rewritten_query,
+        "sub_queries": sub_queries_final,
         "top_k": top_k_final,
     }
-    sql_candidate = _normalize_sql_candidate(out.sql_candidate)
     logger.debug(
         "SearchPlanner LLM done.\n"
         f"rewritten_query={out.rewritten_query[:60]}...\n"
         f"top_k={top_k_final}\n"
-        f"reason={out.reason}\n"
-        f"sql_candidate={sql_candidate}"
+        f"reason={out.reason}"
     )
-    return plan, sql_candidate
+    return plan
 
 
 def create_search_planner_node(*, model_id: str | None = None):
     async def search_planner_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
-        intent = str(state.get("intent") or "").strip()
-        slots = dict(state.get("slots") or {})
-        effective_slots = _mask_slots_for_query(query, slots)
         iteration = int(state.get("rag_iteration") or 0)
         eval_reason = str(state.get("eval_reason") or "")
-        chunks = list(state.get("chunks") or [])
 
         planner_model_kind = model_id or "planner"
 
         if query:
             try:
-                plan, sql_candidate = await _llm_plan(
+                plan = await _llm_plan(
                     model_id=planner_model_kind,
                     query=query,
-                    intent=intent,
-                    slots=effective_slots,
                     iteration=iteration,
                     eval_reason=eval_reason,
-                    chunks=chunks,
                 )
             except ModelRequestTimeoutError:
                 raise
@@ -241,28 +158,18 @@ def create_search_planner_node(*, model_id: str | None = None):
                     type(exc).__name__,
                     exc,
                 )
-                plan = _build_plan_rule(intent, iteration, eval_reason, query)
-                sql_candidate = _default_sql_candidate()
+                plan = _build_plan_rule(iteration, eval_reason, query)
         else:
-            plan = _build_plan_rule(intent, iteration, eval_reason, query)
-            sql_candidate = _default_sql_candidate()
-
-        sql_plan = _default_sql_plan()
+            plan = _build_plan_rule(iteration, eval_reason, query)
         logger.debug(
             "SearchPlanner done.\n"
-            f"intent={intent}\n"
             f"iteration={iteration}\n"
             f"strategy={plan.get('strategy')}\n"
             f"vector_query={plan.get('vector_query', '')[:60]}\n"
-            f"top_k={plan.get('top_k')}\n"
-            f"sql_candidate_enabled={sql_candidate.get('enabled')}\n"
-            f"sql_candidate_tables={sql_candidate.get('selected_tables')}\n"
-            f"sql_limit={sql_plan.get('limit')}"
+            f"top_k={plan.get('top_k')}"
         )
         return {
             "search_plan": plan,
-            "sql_candidate": sql_candidate,
-            "sql_plan": sql_plan,
             "rag_iteration": iteration + 1,
         }
 

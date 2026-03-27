@@ -113,23 +113,14 @@ export function AssistantMessage({
   }
 
   return (
-    <div className="group mr-auto flex w-full justify-start">
+    <div className="flex items-start mr-auto gap-2 group">
       {isToolResult ? (
         <ToolResult message={message} />
       ) : (
-        <div className="flex max-w-[min(92%,50rem)] flex-col gap-2">
-          {(contentString.length > 0 || (isLoading && isLastMessage)) && (
-            <div className="surface-glass rounded-[1.6rem] rounded-tl-md border border-white/82 bg-white/94 px-4 py-3 shadow-[0_18px_38px_rgba(24,72,71,0.08)]">
-              <div className="prose prose-neutral max-w-none text-foreground">
-                {contentString.length > 0 && (
-                  <MarkdownText>{contentString}</MarkdownText>
-                )}
-                {isLoading && isLastMessage && (
-                  <span className="ml-1 inline-block animate-pulse align-middle text-lg leading-none text-primary">
-                    ▍
-                  </span>
-                )}
-              </div>
+        <div className="flex flex-col gap-2">
+          {contentString.length > 0 && (
+            <div className="py-1">
+              <MarkdownText>{contentString}</MarkdownText>
             </div>
           )}
 
@@ -157,7 +148,7 @@ export function AssistantMessage({
           ) : null}
           <div
             className={cn(
-              "mr-auto flex items-center gap-2 transition-opacity",
+              "flex gap-2 items-center mr-auto transition-opacity",
               "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
             )}
           >
@@ -182,11 +173,11 @@ export function AssistantMessage({
 
 export function AssistantMessageLoading() {
   return (
-    <div className="mr-auto flex w-full justify-start">
-      <div className="surface-glass flex items-center gap-1 rounded-[1.45rem] rounded-tl-md border border-white/82 bg-white/94 px-4 py-3 shadow-[0_18px_38px_rgba(24,72,71,0.08)]">
-        <div className="h-1.5 w-1.5 rounded-full bg-foreground/50 animate-[pulse_1.5s_ease-in-out_infinite]"></div>
-        <div className="h-1.5 w-1.5 rounded-full bg-foreground/50 animate-[pulse_1.5s_ease-in-out_0.5s_infinite]"></div>
-        <div className="h-1.5 w-1.5 rounded-full bg-foreground/50 animate-[pulse_1.5s_ease-in-out_1s_infinite]"></div>
+    <div className="flex items-start mr-auto gap-2">
+      <div className="flex items-center gap-1 rounded-2xl bg-muted px-4 py-2 h-8">
+        <div className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-[pulse_1.5s_ease-in-out_infinite]"></div>
+        <div className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-[pulse_1.5s_ease-in-out_0.5s_infinite]"></div>
+        <div className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-[pulse_1.5s_ease-in-out_1s_infinite]"></div>
       </div>
     </div>
   );

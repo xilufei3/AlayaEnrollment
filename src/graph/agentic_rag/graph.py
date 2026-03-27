@@ -6,12 +6,9 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from ..llm import ModelRequestTimeoutError
-from .node.merge_context import create_merge_context_node
 from .node.rerank import create_rerank_node
 from .node.retrieval import create_retrieval_node
 from .node.search_planner import create_search_planner_node
-from .node.sql_plan_builder import create_sql_plan_builder_node
-from .node.sql_query import create_sql_query_node
 from .node.sufficiency_eval import create_sufficiency_eval_node
 from .schemas import RAGState
 
@@ -44,19 +41,13 @@ def _compile_rag_graph(
 
     g.add_node("search_planner", create_search_planner_node(model_id=search_planner_model_id))
     g.add_node("retrieval", create_retrieval_node(retriever=retriever, top_k=top_k))
-    g.add_node("sql_plan_builder", create_sql_plan_builder_node(model_id=search_planner_model_id))
-    g.add_node("sql_query", create_sql_query_node())
     g.add_node("rerank", create_rerank_node())
-    g.add_node("merge_context", create_merge_context_node())
     g.add_node("eval", create_sufficiency_eval_node(model_id=eval_model_id))
 
     g.add_edge(START, "search_planner")
     g.add_edge("search_planner", "retrieval")
-    g.add_edge("search_planner", "sql_plan_builder")
     g.add_edge("retrieval", "rerank")
-    g.add_edge("sql_plan_builder", "sql_query")
-    g.add_edge(["rerank", "sql_query"], "merge_context")
-    g.add_edge("merge_context", "eval")
+    g.add_edge("rerank", "eval")
     g.add_conditional_edges(
         "eval",
         _route_after_eval,
@@ -112,24 +103,18 @@ def create_agentic_rag_node(
             raise
         except Exception as exc:
             logger.error(f"AgenticRAG sub-graph error {type(exc).__name__}: {exc}")
-            return {"chunks": [], "missing_slots": [], "structured_results": []}
+            return {"chunks": []}
 
         chunks = list(final_state.get("chunks") or [])
-        missing_slots = list(final_state.get("missing_slots") or [])
-        structured_results = list(final_state.get("structured_results") or [])
         eval_result = str(final_state.get("eval_result") or "sufficient")
 
         logger.debug(
             "AgenticRAG done.\n"
             f"eval_result={eval_result}\n"
-            f"chunks={len(chunks)}\n"
-            f"structured_results={len(structured_results)}\n"
-            f"missing_slots={missing_slots}"
+            f"chunks={len(chunks)}"
         )
         return {
             "chunks": chunks,
-            "missing_slots": missing_slots,
-            "structured_results": structured_results,
         }
 
     return agentic_rag_node

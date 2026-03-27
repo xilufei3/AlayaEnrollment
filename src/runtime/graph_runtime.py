@@ -336,14 +336,11 @@ def _validate_required_env_vars() -> None:
 class AdmissionGraphRuntime:
     STAGE_ORDER = (
         "intent_classify",      # 意图识别
-        "out_of_scope_reply",   # 超范围拒答
-        "chitchat_reply",       # 寒暄 / 低置信度回复
         "agentic_rag",          # Agentic RAG（检索+评估循环）
-        "slot_followup",        # 缺槽位追问
         "generate",             # RAG 生成答案
     )
 
-    _ANSWER_NODES = {"generate", "out_of_scope_reply", "chitchat_reply", "slot_followup"}
+    _ANSWER_NODES = {"generate"}
 
     def __init__(self, cfg: RuntimeConfig) -> None:
         self.cfg = cfg
@@ -955,14 +952,10 @@ class AdmissionGraphRuntime:
                             summary: dict[str, Any] = {"stage": node_name, "session_id": session_id}
                             if isinstance(payload, dict):
                                 if node_name == "intent_classify":
-                                    summary["intent"] = payload.get("intent", "")
-                                    summary["confidence"] = payload.get("confidence", 0.0)
+                                    summary["in_scope"] = bool(payload.get("in_scope", True))
                                 elif node_name == "agentic_rag":
                                     chunks = payload.get("chunks", []) or []
                                     summary["chunks_count"] = len(chunks)
-                                    missing = payload.get("missing_slots") or []
-                                    if missing:
-                                        summary["missing_slots"] = missing
                                 elif node_name in self._ANSWER_NODES:
                                     answer = str(payload.get("answer", "") or "")
                                     result_answer = answer

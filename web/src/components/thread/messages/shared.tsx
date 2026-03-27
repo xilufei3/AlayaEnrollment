@@ -13,11 +13,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
-// Keep branch navigation and AI regenerate hidden until checkpoint semantics
-// are wired through the backend/runtime compat layer.
-const SHOW_BRANCH_SWITCHER = false;
-const SHOW_AI_REFRESH = false;
-
 function ContentCopyable({
   content,
   disabled,
@@ -79,7 +74,6 @@ export function BranchSwitcher({
   onSelect: (branch: string) => void;
   isLoading: boolean;
 }) {
-  if (!SHOW_BRANCH_SWITCHER) return null;
   if (!branchOptions || !branch) return null;
   const index = branchOptions.indexOf(branch);
 
@@ -194,7 +188,7 @@ export function CommandBar({
   return (
     <div className="flex items-center gap-2">
       <ContentCopyable content={content} disabled={isLoading} />
-      {SHOW_AI_REFRESH && isAiMessage && !!handleRegenerate && (
+      {isAiMessage && !!handleRegenerate && (
         <TooltipIconButton
           disabled={isLoading}
           tooltip="Refresh"

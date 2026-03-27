@@ -13,6 +13,8 @@ def _overwrite(left: Any, right: Any) -> Any:
 class SearchPlan(TypedDict, total=False):
     strategy: Literal["vector_keyword_hybrid"]
     vector_query: str
+    sub_queries: list[str]
+    filter_expr: str
     top_k: int
 
 

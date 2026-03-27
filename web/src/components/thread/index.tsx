@@ -1,134 +1,46 @@
-﻿import { v4 as uuidv4 } from "uuid";
-import {
-  FormEvent,
-  ReactNode,
-  type CSSProperties,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import { AnimatePresence, motion, type Transition } from "framer-motion";
-import { Checkpoint, Message } from "@langchain/langgraph-sdk";
-import { parseAsBoolean, useQueryState } from "nuqs";
-import { toast } from "sonner";
-import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
-import {
-  ArrowDown,
-  ChevronRight,
-  FileText,
-  GraduationCap,
-  House,
-  LoaderCircle,
-  MapPinned,
-  Microscope,
-  PanelRightClose,
-  PanelRightOpen,
-  Rocket,
-  SendHorizontal,
-  ShieldCheck,
-} from "lucide-react";
-
+import { v4 as uuidv4 } from "uuid";
+import { ReactNode, useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useStreamContext } from "@/providers/Stream";
+import { useState, FormEvent } from "react";
+import { Button } from "../ui/button";
+import { Checkpoint, Message } from "@langchain/langgraph-sdk";
+import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
+import { HumanMessage } from "./messages/human";
 import {
   DO_NOT_RENDER_ID_PREFIX,
   ensureToolCallsHaveResponses,
 } from "@/lib/ensure-tool-responses";
-
-import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
-import { ThreadHeader } from "./header";
-import { HumanMessage } from "./messages/human";
-import ThreadHistory from "./history";
+import { LangGraphLogoSVG } from "../icons/langgraph";
 import { TooltipIconButton } from "./tooltip-icon-button";
-import { BRAND_COPY, QUICK_PROMPTS } from "./branding";
 import {
-  shouldShowStandaloneHistoryToggle,
-} from "./top-bar-visibility";
-import { Button } from "../ui/button";
-
-function isThreadNotFoundMessage(message: string | undefined): boolean {
-  if (!message) return false;
-  return message.includes("Thread not found");
-}
-
-const PROMPT_THEMES = [
-  {
-    accent: "#1D9E75",
-    chipBackground: "rgba(29, 158, 117, 0.12)",
-    chipColor: "#166e56",
-    hintColor: "rgba(24, 72, 71, 0.72)",
-    background:
-      "linear-gradient(180deg, rgba(239, 249, 244, 0.98) 0%, rgba(255, 255, 255, 0.96) 100%)",
-    borderColor: "rgba(29, 158, 117, 0.18)",
-    shadow: "0 24px 48px rgba(29, 158, 117, 0.18)",
-    icon: FileText,
-  },
-  {
-    accent: "#3B82F6",
-    chipBackground: "rgba(59, 130, 246, 0.12)",
-    chipColor: "#1d5fcb",
-    hintColor: "rgba(33, 72, 135, 0.72)",
-    background:
-      "linear-gradient(180deg, rgba(240, 246, 255, 0.98) 0%, rgba(255, 255, 255, 0.96) 100%)",
-    borderColor: "rgba(59, 130, 246, 0.16)",
-    shadow: "0 24px 48px rgba(59, 130, 246, 0.16)",
-    icon: GraduationCap,
-  },
-  {
-    accent: "#D39A2C",
-    chipBackground: "rgba(211, 154, 44, 0.13)",
-    chipColor: "#a86a00",
-    hintColor: "rgba(120, 83, 16, 0.75)",
-    background:
-      "linear-gradient(180deg, rgba(255, 248, 232, 0.98) 0%, rgba(255, 255, 255, 0.96) 100%)",
-    borderColor: "rgba(211, 154, 44, 0.17)",
-    shadow: "0 24px 48px rgba(211, 154, 44, 0.15)",
-    icon: House,
-  },
-  {
-    accent: "#7C5CFC",
-    chipBackground: "rgba(124, 92, 252, 0.12)",
-    chipColor: "#5d3ee0",
-    hintColor: "rgba(83, 55, 160, 0.74)",
-    background:
-      "linear-gradient(180deg, rgba(246, 243, 255, 0.98) 0%, rgba(255, 255, 255, 0.96) 100%)",
-    borderColor: "rgba(124, 92, 252, 0.16)",
-    shadow: "0 24px 48px rgba(124, 92, 252, 0.14)",
-    icon: Microscope,
-  },
-  {
-    accent: "#D64A8B",
-    chipBackground: "rgba(214, 74, 139, 0.12)",
-    chipColor: "#b73170",
-    hintColor: "rgba(132, 44, 87, 0.72)",
-    background:
-      "linear-gradient(180deg, rgba(255, 243, 249, 0.98) 0%, rgba(255, 255, 255, 0.96) 100%)",
-    borderColor: "rgba(214, 74, 139, 0.16)",
-    shadow: "0 24px 48px rgba(214, 74, 139, 0.14)",
-    icon: MapPinned,
-  },
-  {
-    accent: "#0F766E",
-    chipBackground: "rgba(15, 118, 110, 0.13)",
-    chipColor: "#0d5e58",
-    hintColor: "rgba(14, 88, 82, 0.76)",
-    background:
-      "linear-gradient(180deg, rgba(236, 248, 247, 0.98) 0%, rgba(255, 255, 255, 0.96) 100%)",
-    borderColor: "rgba(15, 118, 110, 0.17)",
-    shadow: "0 24px 48px rgba(15, 118, 110, 0.14)",
-    icon: Rocket,
-  },
-] as const;
-
-const HISTORY_PANEL_WIDTH = 320;
+  ArrowDown,
+  LoaderCircle,
+  PanelRightOpen,
+  PanelRightClose,
+  SquarePen,
+} from "lucide-react";
+import { useQueryState, parseAsBoolean } from "nuqs";
+import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
+import ThreadHistory from "./history";
+import { toast } from "sonner";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { Label } from "../ui/label";
+import { Switch } from "../ui/switch";
+import { GitHubSVG } from "../icons/github";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
   footer?: ReactNode;
   className?: string;
   contentClassName?: string;
-  contentStyle?: CSSProperties;
 }) {
   const context = useStickToBottomContext();
   return (
@@ -137,11 +49,7 @@ function StickyToBottomContent(props: {
       style={{ width: "100%", height: "100%" }}
       className={props.className}
     >
-      <div
-        ref={context.contentRef}
-        className={props.contentClassName}
-        style={props.contentStyle}
-      >
+      <div ref={context.contentRef} className={props.contentClassName}>
         {props.content}
       </div>
 
@@ -150,123 +58,40 @@ function StickyToBottomContent(props: {
   );
 }
 
-function ScrollToBottom(props: { className?: string; style?: CSSProperties }) {
+function ScrollToBottom(props: { className?: string }) {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
 
   if (isAtBottom) return null;
   return (
     <Button
       variant="outline"
-      className={cn(
-        "surface-glass rounded-full border-white/80 px-4 py-2 text-foreground shadow-[0_14px_28px_rgba(24,72,71,0.14)]",
-        props.className,
-      )}
-      style={props.style}
+      className={props.className}
       onClick={() => scrollToBottom()}
     >
-      <ArrowDown className="h-4 w-4" />
-      <span>回到底部</span>
+      <ArrowDown className="w-4 h-4" />
+      <span>Scroll to bottom</span>
     </Button>
   );
 }
 
-function LandingHero(props: { onPromptSelect: (question: string) => void }) {
+function OpenGitHubRepo() {
   return (
-    <div className="space-y-[1.125rem] pb-3">
-      <div className="flex items-center justify-between gap-4 px-1">
-        <p className="text-sm font-semibold tracking-[0.18em] text-foreground/88">
-          热门问题
-        </p>
-      </div>
-
-      <div className="grid items-stretch gap-[0.7rem] sm:grid-cols-2 sm:auto-rows-fr sm:gap-3 lg:grid-cols-3 lg:grid-rows-2">
-        {QUICK_PROMPTS.map((prompt, index) => {
-          const theme = PROMPT_THEMES[index % PROMPT_THEMES.length];
-          const Icon = theme.icon;
-
-          return (
-            <motion.button
-              key={prompt.label}
-              type="button"
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.05 * index, duration: 0.3 }}
-              whileHover={{
-                y: -2,
-                boxShadow: theme.shadow,
-              }}
-              onClick={() => props.onPromptSelect(prompt.question)}
-              className="group relative h-full overflow-hidden rounded-[1.25rem] border p-[0.9rem] text-left transition-all duration-300 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/15 sm:p-4"
-              style={{
-                background: theme.background,
-                borderColor: theme.borderColor,
-                boxShadow: "0 10px 24px rgba(24, 72, 71, 0.07)",
-              }}
-            >
-              <span className="absolute bottom-3.5 left-0 top-3.5 flex w-1 items-center">
-                <span
-                  className="h-full w-full origin-center rounded-r-full scale-y-[0.42] transition-transform duration-300 group-hover:scale-y-100"
-                  style={{ background: theme.accent }}
-                />
-              </span>
-              <div className="relative flex h-full flex-col">
-                <div className="flex items-start justify-between gap-3">
-                  <div
-                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-[0.3125rem] text-[10.5px] font-semibold tracking-[0.12em]"
-                    style={{
-                      background: theme.chipBackground,
-                      color: theme.chipColor,
-                    }}
-                  >
-                    <Icon className="size-[0.82rem]" />
-                    {prompt.label}
-                  </div>
-                  <span className="text-[10.5px] text-muted-foreground">
-                    热门咨询
-                  </span>
-                </div>
-
-                <div className="mt-3.5 flex flex-1 flex-col">
-                  <p
-                    className="text-[14.5px] font-medium leading-[1.65rem] text-foreground sm:text-[15.5px]"
-                    style={{
-                      display: "-webkit-box",
-                      overflow: "hidden",
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: "vertical",
-                    }}
-                  >
-                    {prompt.question}
-                  </p>
-                  <p
-                    className="mt-2 text-[12.75px] leading-[1.4rem]"
-                    style={{
-                      color: theme.hintColor,
-                      display: "-webkit-box",
-                      overflow: "hidden",
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: "vertical",
-                    }}
-                  >
-                    {prompt.hint}
-                  </p>
-                </div>
-
-                <div className="mt-auto flex items-center justify-end gap-3 pt-3.5">
-                  <div
-                    className="flex items-center gap-1.5 text-[12.75px] font-semibold"
-                    style={{ color: theme.accent }}
-                  >
-                    立即提问
-                    <ChevronRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                  </div>
-                </div>
-              </div>
-            </motion.button>
-          );
-        })}
-      </div>
-    </div>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <a
+            href="https://github.com/langchain-ai/agent-chat-ui"
+            target="_blank"
+            className="flex items-center justify-center"
+          >
+            <GitHubSVG width="24" height="24" />
+          </a>
+        </TooltipTrigger>
+        <TooltipContent side="left">
+          <p>Open GitHub repo</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -276,13 +101,13 @@ export function Thread() {
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
+  const [hideToolCalls, setHideToolCalls] = useQueryState(
+    "hideToolCalls",
+    parseAsBoolean.withDefault(false),
+  );
   const [input, setInput] = useState("");
-  const [composerFocused, setComposerFocused] = useState(false);
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const composerDockRef = useRef<HTMLDivElement | null>(null);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
-  const [composerHeight, setComposerHeight] = useState(236);
 
   const stream = useStreamContext();
   const messages = stream.messages;
@@ -296,16 +121,15 @@ export function Thread() {
       return;
     }
     try {
-      const message = (stream.error as { message?: string }).message;
+      const message = (stream.error as any).message;
       if (!message || lastError.current === message) {
+        // Message has already been logged. do not modify ref, return early.
         return;
       }
 
+      // Message is defined, and it has not been logged yet. Save it, and send the error
       lastError.current = message;
-      if (isThreadNotFoundMessage(message)) {
-        setThreadId(null);
-      }
-      toast.error("Message failed to send. Please try again shortly.", {
+      toast.error("An error occurred. Please try again.", {
         description: (
           <p>
             <strong>Error:</strong> <code>{message}</code>
@@ -319,11 +143,12 @@ export function Thread() {
     }
   }, [stream.error]);
 
+  // TODO: this should be part of the useStream hook
   const prevMessageLength = useRef(0);
   useEffect(() => {
     if (
       messages.length !== prevMessageLength.current &&
-      messages.length &&
+      messages?.length &&
       messages[messages.length - 1].type === "ai"
     ) {
       setFirstTokenReceived(true);
@@ -340,7 +165,7 @@ export function Thread() {
     const newHumanMessage: Message = {
       id: uuidv4(),
       type: "human",
-      content: input.trim(),
+      content: input,
     };
 
     const toolMessages = ensureToolCallsHaveResponses(stream.messages);
@@ -365,6 +190,7 @@ export function Thread() {
   const handleRegenerate = (
     parentCheckpoint: Checkpoint | null | undefined,
   ) => {
+    // Do this so the loading state is correct
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
     stream.submit(undefined, {
@@ -373,146 +199,142 @@ export function Thread() {
     });
   };
 
-  const handlePromptSelect = (question: string) => {
-    setInput(question);
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  };
-
-  const handleResetThread = () => {
-    setThreadId(null);
-    setInput("");
-  };
-
   const chatStarted = !!threadId || !!messages.length;
-  const showStandaloneHistoryToggle =
-    shouldShowStandaloneHistoryToggle(chatStarted);
   const hasNoAIOrToolMessages = !messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
-  const composerInsetLeft = isLargeScreen && chatHistoryOpen ? 320 : 0;
-  const historyPanelTransition: Transition = isLargeScreen
-    ? { type: "spring", stiffness: 300, damping: 32 }
-    : { duration: 0 };
-  const contentCenterOffset =
-    isLargeScreen && chatHistoryOpen ? HISTORY_PANEL_WIDTH / 2 : 0;
-  const reservedComposerSpace = Math.max(
-    composerHeight + (chatStarted ? 24 : 16),
-    chatStarted ? 220 : 240,
-  );
-
-  useEffect(() => {
-    const node = composerDockRef.current;
-    if (!node) return;
-
-    const updateHeight = () => {
-      setComposerHeight(Math.ceil(node.getBoundingClientRect().height));
-    };
-
-    updateHeight();
-
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => updateHeight());
-    observer.observe(node);
-
-    return () => observer.disconnect();
-  }, [chatHistoryOpen, chatStarted]);
 
   return (
-    <div className="relative flex h-screen w-full overflow-hidden">
-      <div className="relative hidden lg:flex">
+    <div className="flex w-full h-screen overflow-hidden">
+      <div className="relative lg:flex hidden">
         <motion.div
-          className="absolute z-20 h-full overflow-hidden"
-          style={{ width: HISTORY_PANEL_WIDTH }}
-          animate={{ x: chatHistoryOpen ? 0 : -HISTORY_PANEL_WIDTH }}
-          initial={{ x: -HISTORY_PANEL_WIDTH }}
-          transition={historyPanelTransition}
+          className="absolute h-full border-r bg-white overflow-hidden z-20"
+          style={{ width: 300 }}
+          animate={
+            isLargeScreen
+              ? { x: chatHistoryOpen ? 0 : -300 }
+              : { x: chatHistoryOpen ? 0 : -300 }
+          }
+          initial={{ x: -300 }}
+          transition={
+            isLargeScreen
+              ? { type: "spring", stiffness: 300, damping: 30 }
+              : { duration: 0 }
+          }
         >
-          <div
-            className="relative h-full"
-            style={{ width: HISTORY_PANEL_WIDTH }}
-          >
+          <div className="relative h-full" style={{ width: 300 }}>
             <ThreadHistory />
           </div>
         </motion.div>
       </div>
-
       <motion.div
-        className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+        className={cn(
+          "flex-1 flex flex-col min-w-0 overflow-hidden relative",
+          !chatStarted && "grid-rows-[1fr]",
+        )}
         layout={isLargeScreen}
         animate={{
-          marginLeft: chatHistoryOpen ? (isLargeScreen ? HISTORY_PANEL_WIDTH : 0) : 0,
+          marginLeft: chatHistoryOpen ? (isLargeScreen ? 300 : 0) : 0,
           width: chatHistoryOpen
             ? isLargeScreen
-              ? `calc(100% - ${HISTORY_PANEL_WIDTH}px)`
+              ? "calc(100% - 300px)"
               : "100%"
             : "100%",
         }}
-        transition={historyPanelTransition}
+        transition={
+          isLargeScreen
+            ? { type: "spring", stiffness: 300, damping: 30 }
+            : { duration: 0 }
+        }
       >
-        {showStandaloneHistoryToggle && (
-          <div className="pointer-events-none absolute left-4 top-4 z-20 sm:left-6 lg:left-8">
-            <TooltipIconButton
-              size="lg"
-              side="right"
-              tooltip={chatHistoryOpen ? "Hide history" : "Show history"}
-              variant="ghost"
-              className="pointer-events-auto size-11 rounded-full border border-white/80 bg-white/82 p-0 shadow-[0_14px_32px_rgba(24,72,71,0.14)] backdrop-blur hover:bg-white"
-              onClick={() => setChatHistoryOpen((prev) => !prev)}
-            >
-              {chatHistoryOpen ? (
-                <PanelRightOpen className="size-5" />
-              ) : (
-                <PanelRightClose className="size-5" />
+        {!chatStarted && (
+          <div className="absolute top-0 left-0 w-full flex items-center justify-between gap-3 p-2 pl-4 z-10">
+            <div>
+              {(!chatHistoryOpen || !isLargeScreen) && (
+                <Button
+                  className="hover:bg-gray-100"
+                  variant="ghost"
+                  onClick={() => setChatHistoryOpen((p) => !p)}
+                >
+                  {chatHistoryOpen ? (
+                    <PanelRightOpen className="size-5" />
+                  ) : (
+                    <PanelRightClose className="size-5" />
+                  )}
+                </Button>
               )}
-            </TooltipIconButton>
+            </div>
+            <div className="absolute top-2 right-4 flex items-center">
+              <OpenGitHubRepo />
+            </div>
           </div>
         )}
+        {chatStarted && (
+          <div className="flex items-center justify-between gap-3 p-2 z-10 relative">
+            <div className="flex items-center justify-start gap-2 relative">
+              <div className="absolute left-0 z-10">
+                {(!chatHistoryOpen || !isLargeScreen) && (
+                  <Button
+                    className="hover:bg-gray-100"
+                    variant="ghost"
+                    onClick={() => setChatHistoryOpen((p) => !p)}
+                  >
+                    {chatHistoryOpen ? (
+                      <PanelRightOpen className="size-5" />
+                    ) : (
+                      <PanelRightClose className="size-5" />
+                    )}
+                  </Button>
+                )}
+              </div>
+              <motion.button
+                className="flex gap-2 items-center cursor-pointer"
+                onClick={() => setThreadId(null)}
+                animate={{
+                  marginLeft: !chatHistoryOpen ? 48 : 0,
+                }}
+                transition={{
+                  type: "spring",
+                  stiffness: 300,
+                  damping: 30,
+                }}
+              >
+                <LangGraphLogoSVG width={32} height={32} />
+                <span className="text-xl font-semibold tracking-tight">
+                  Agent Chat
+                </span>
+              </motion.button>
+            </div>
 
-        <ThreadHeader
-          variant={chatStarted ? "chat" : "landing"}
-          onResetThread={handleResetThread}
-          className={cn(
-            "relative z-10",
-            chatStarted
-              ? "px-[4.25rem] pb-2 pt-3.5 sm:px-[5.1rem] sm:pb-2 lg:px-8"
-              : "px-4 pb-2.5 pt-3.5 sm:px-6 lg:px-8",
-          )}
-        />
+            <div className="flex items-center gap-4">
+              <div className="flex items-center">
+                <OpenGitHubRepo />
+              </div>
+              <TooltipIconButton
+                size="lg"
+                className="p-4"
+                tooltip="New thread"
+                variant="ghost"
+                onClick={() => setThreadId(null)}
+              >
+                <SquarePen className="size-5" />
+              </TooltipIconButton>
+            </div>
+
+            <div className="absolute inset-x-0 top-full h-5 bg-gradient-to-b from-background to-background/0" />
+          </div>
+        )}
 
         <StickToBottom className="relative flex-1 overflow-hidden">
           <StickyToBottomContent
             className={cn(
-              "absolute inset-0 px-4 sm:px-6 lg:px-8",
-              chatStarted || !isLargeScreen ? "overflow-y-scroll" : "overflow-y-hidden",
-              "[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/20 [&::-webkit-scrollbar-track]:bg-transparent",
+              "absolute px-4 inset-0 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
+              !chatStarted && "flex flex-col items-stretch mt-[25vh]",
+              chatStarted && "grid grid-rows-[1fr_auto]",
             )}
-            contentClassName={cn(
-              "mx-auto flex w-full flex-col gap-[1.125rem]",
-              chatStarted
-                ? "max-w-[50.4rem] pt-3"
-                : "max-w-[50.4rem] pt-2.5",
-            )}
-            contentStyle={{ paddingBottom: reservedComposerSpace }}
+            contentClassName="pt-8 pb-16  max-w-3xl mx-auto flex flex-col gap-4 w-full"
             content={
               <>
-                <AnimatePresence initial={false}>
-                  {!chatStarted && (
-                    <motion.div
-                      key="landing-shell"
-                      initial={{ opacity: 1, height: "auto" }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                      transition={{ duration: 0.22, ease: "easeInOut" }}
-                      className="overflow-hidden"
-                    >
-                      <LandingHero onPromptSelect={handlePromptSelect} />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
                 {messages
                   .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
                   .map((message, index) =>
@@ -531,7 +353,8 @@ export function Thread() {
                       />
                     ),
                   )}
-
+                {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
+                    We need to render it outside of the messages list, since there are no messages to render */}
                 {hasNoAIOrToolMessages && !!stream.interrupt && (
                   <AssistantMessage
                     key="interrupt-msg"
@@ -540,120 +363,86 @@ export function Thread() {
                     handleRegenerate={handleRegenerate}
                   />
                 )}
-
                 {isLoading && !firstTokenReceived && (
                   <AssistantMessageLoading />
                 )}
               </>
             }
             footer={
-              <ScrollToBottom
-                className="fixed left-1/2 z-30 -translate-x-1/2 animate-in fade-in-0 zoom-in-95"
-                style={{
-                  bottom: composerHeight + 24,
-                  marginLeft: contentCenterOffset,
-                }}
-              />
-            }
-          />
-        </StickToBottom>
-
-        <motion.div
-          initial={false}
-          className="pointer-events-none fixed bottom-0 right-0 z-20"
-          animate={{ left: composerInsetLeft }}
-          transition={historyPanelTransition}
-        >
-          <div className="bg-gradient-to-t from-bg-warm via-bg-warm-light/96 to-transparent px-4 pb-4 pt-6 sm:px-6 lg:px-8">
-            <div className="relative mx-auto w-full max-w-[50.4rem]">
-              <div ref={composerDockRef} className="pointer-events-auto">
+              <div className="sticky flex flex-col items-center gap-8 bottom-0 bg-white">
                 {!chatStarted && (
-                  <div className="mb-3.5 flex items-center gap-3.5 px-2">
-                    <div className="h-px flex-1 bg-gradient-to-r from-transparent via-primary/28 to-primary/6" />
-                    <span className="text-[13.5px] font-medium text-muted-foreground">
-                      或直接输入你的问题
-                    </span>
-                    <div className="h-px flex-1 bg-gradient-to-l from-transparent via-primary/28 to-primary/6" />
+                  <div className="flex gap-3 items-center">
+                    <LangGraphLogoSVG className="flex-shrink-0 h-8" />
+                    <h1 className="text-2xl font-semibold tracking-tight">
+                      Agent Chat
+                    </h1>
                   </div>
                 )}
 
-                <div
-                  className="surface-glass relative overflow-hidden rounded-[1.8rem] border transition-all duration-300"
-                  style={{
-                    borderColor: composerFocused
-                      ? "color-mix(in srgb, var(--primary) 36%, transparent)"
-                      : "rgba(255, 255, 255, 0.82)",
-                    boxShadow: composerFocused
-                      ? "0 0 0 4px color-mix(in srgb, var(--primary) 11%, transparent), 0 28px 60px color-mix(in srgb, var(--primary) 16%, transparent)"
-                      : "0 24px 60px rgba(24, 72, 71, 0.12)",
-                  }}
-                >
-                  <div className="pointer-events-none absolute -right-10 top-0 h-[6.25rem] w-[6.25rem] rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--primary)_15%,transparent),transparent_72%)]" />
-                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent-gold/75 to-transparent" />
-                  <form onSubmit={handleSubmit} className="grid">
-                    <div className="px-[1.125rem] pt-[1.125rem] sm:px-5 sm:pt-5">
-                      <textarea
-                        ref={textareaRef}
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onFocus={() => setComposerFocused(true)}
-                        onBlur={() => setComposerFocused(false)}
-                        onKeyDown={(e) => {
-                          if (
-                            e.key === "Enter" &&
-                            !e.shiftKey &&
-                            !e.metaKey &&
-                            !e.nativeEvent.isComposing
-                          ) {
-                            e.preventDefault();
-                            const el = e.target as HTMLElement | undefined;
-                            const form = el?.closest("form");
-                            form?.requestSubmit();
-                          }
-                        }}
-                        placeholder={BRAND_COPY.composerPlaceholder}
-                        className="min-h-[100px] w-full resize-none bg-transparent text-[14.5px] leading-[1.65rem] text-foreground shadow-none outline-none placeholder:text-[14.5px] placeholder:text-muted-foreground/85 focus:outline-none"
-                      />
-                    </div>
+                <ScrollToBottom className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 animate-in fade-in-0 zoom-in-95" />
 
-                    <div className="flex flex-col gap-3.5 border-t border-primary/10 px-[1.125rem] py-[0.875rem] sm:flex-row sm:items-end sm:justify-between sm:px-5">
-                      <div className="space-y-1.5">
-                        <div className="flex items-start gap-2 text-[13px] leading-[1.35rem] text-muted-foreground">
-                          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-accent-gold" />
-                          <p>{BRAND_COPY.disclaimer}</p>
+                <div className="bg-muted rounded-2xl border shadow-xs mx-auto mb-8 w-full max-w-3xl relative z-10">
+                  <form
+                    onSubmit={handleSubmit}
+                    className="grid grid-rows-[1fr_auto] gap-2 max-w-3xl mx-auto"
+                  >
+                    <textarea
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (
+                          e.key === "Enter" &&
+                          !e.shiftKey &&
+                          !e.metaKey &&
+                          !e.nativeEvent.isComposing
+                        ) {
+                          e.preventDefault();
+                          const el = e.target as HTMLElement | undefined;
+                          const form = el?.closest("form");
+                          form?.requestSubmit();
+                        }
+                      }}
+                      placeholder="Type your message..."
+                      className="p-3.5 pb-0 border-none bg-transparent field-sizing-content shadow-none ring-0 outline-none focus:outline-none focus:ring-0 resize-none"
+                    />
+
+                    <div className="flex items-center justify-between p-2 pt-4">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <Switch
+                            id="render-tool-calls"
+                            checked={hideToolCalls ?? false}
+                            onCheckedChange={setHideToolCalls}
+                          />
+                          <Label
+                            htmlFor="render-tool-calls"
+                            className="text-sm text-gray-600"
+                          >
+                            Hide Tool Calls
+                          </Label>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-3 self-end sm:self-auto">
-                        {stream.isLoading ? (
-                          <Button
-                            key="stop"
-                            variant="outline"
-                            className="h-10 rounded-full border-primary/18 bg-white/80 px-[1.375rem] text-foreground shadow-[0_12px_24px_rgba(24,72,71,0.08)]"
-                            onClick={() => stream.stop()}
-                          >
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                            停止生成
-                          </Button>
-                        ) : (
-                          <Button
-                            type="submit"
-                            variant="brand"
-                            className="h-10 rounded-full px-[1.375rem]"
-                            disabled={isLoading || !input.trim()}
-                          >
-                            <SendHorizontal className="size-4" />
-                            发送咨询
-                          </Button>
-                        )}
-                      </div>
+                      {stream.isLoading ? (
+                        <Button key="stop" onClick={() => stream.stop()}>
+                          <LoaderCircle className="w-4 h-4 animate-spin" />
+                          Cancel
+                        </Button>
+                      ) : (
+                        <Button
+                          type="submit"
+                          className="transition-all shadow-md"
+                          disabled={isLoading || !input.trim()}
+                        >
+                          Send
+                        </Button>
+                      )}
                     </div>
                   </form>
                 </div>
               </div>
-            </div>
-          </div>
-        </motion.div>
+            }
+          />
+        </StickToBottom>
       </motion.div>
     </div>
   );
