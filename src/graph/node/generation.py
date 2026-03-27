@@ -169,7 +169,7 @@ class GenerationComponent:
         if structured_text:
             context_parts.append(self._structured_results_guidance_text())
             context_parts.append(f"SQL 结构化结果：\n{structured_text}")
-        context = "\n\n".join(context_parts) if context_parts else "（当前没有可用材料）"
+        context = "\n\n".join(context_parts) if context_parts else "（本轮无可用参考材料）"
         history = self._history_text(messages or [])
 
         system_prompt = build_generation_system_prompt(
