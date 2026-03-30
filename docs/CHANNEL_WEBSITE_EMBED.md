@@ -159,7 +159,7 @@ http://<HOST>:8082/embed.js
 ```html
 <script
   src="http://<HOST>:8082/embed.js"
-  data-bot-src="http://<HOST>:8082/zs-ai/"
+  data-bot-src="http://<HOST>:8082/zs-ai/embed"
   data-open-icon="http://<HOST>:8082/branding/sustech-logo.png"
   data-close-icon="http://<HOST>:8082/branding/sustech-logo.png"
   data-drag="true"
@@ -169,14 +169,16 @@ http://<HOST>:8082/embed.js
 
 将 `<HOST>` 替换为部署机的内网 IP（例如 `10.16.18.60`）。
 
+`data-bot-src` 推荐使用 `/zs-ai/embed`，该页面针对悬浮窗做了布局简化（无历史侧栏、默认紧凑输入区），体验更稳定。
+
 ---
 
 ## 与旧系统对照
 
 | 项目 | 旧系统（Flowise） | 当前系统 |
 |------|-----------------|---------|
-| 嵌入脚本地址 | `http://10.16.18.60:3001/iframe.js` | `http://<HOST>:8082/zs-ai/embed.js` |
-| 聊天页面地址 | `http://10.16.18.60:3001/chat/flow/xxx` | `http://<HOST>:8082/zs-ai/` |
-| `X-Frame-Options` | 允许嵌入 | 默认 DENY，**需步骤一修改** |
+| 嵌入脚本地址 | `http://10.16.18.60:3001/iframe.js` | `http://<HOST>:8082/embed.js` |
+| 聊天页面地址 | `http://10.16.18.60:3001/chat/flow/xxx` | `http://<HOST>:8082/zs-ai/embed`（悬浮窗专用） |
+| `X-Frame-Options` | 允许嵌入 | 已移除 DENY（改由 CSP 控制） |
 | API 鉴权 | 无 | BFF 自动注入，前端无感知 |
 | 嵌入脚本来源 | Flowise 内置 | **需步骤二自行创建** |

@@ -96,7 +96,11 @@ function ThreadHistoryLoading() {
   );
 }
 
-export default function ThreadHistory() {
+type ThreadHistoryProps = {
+  mobileOnly?: boolean;
+};
+
+export default function ThreadHistory({ mobileOnly = false }: ThreadHistoryProps) {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
   const [threadId, setThreadId] = useQueryState("threadId");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
@@ -164,7 +168,12 @@ export default function ThreadHistory() {
 
   return (
     <>
-      <div className="surface-glass hidden h-screen w-[320px] shrink-0 flex-col items-start justify-start gap-6 border-r border-white/55 px-4 pb-5 pt-4 shadow-inner-right lg:flex">
+      <div
+        className={cn(
+          "surface-glass hidden h-screen w-[320px] shrink-0 flex-col items-start justify-start gap-6 border-r border-white/55 px-4 pb-5 pt-4 shadow-inner-right lg:flex",
+          mobileOnly && "hidden",
+        )}
+      >
         <div className="flex w-full items-start justify-between gap-3">
           <div className="flex items-start gap-3">
             <SustechMark className="h-11 w-11" />

@@ -270,7 +270,15 @@ function LandingHero(props: { onPromptSelect: (question: string) => void }) {
   );
 }
 
-export function Thread() {
+type ThreadProps = {
+  compact?: boolean;
+  showHistoryInCompact?: boolean;
+};
+
+export function Thread({
+  compact = false,
+  showHistoryInCompact = false,
+}: ThreadProps = {}) {
   const [threadId, setThreadId] = useQueryState("threadId");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
@@ -289,6 +297,16 @@ export function Thread() {
   const isLoading = stream.isLoading;
 
   const lastError = useRef<string | undefined>(undefined);
+
+  const historyEnabled = !compact || showHistoryInCompact;
+  const showDesktopHistoryPanel = historyEnabled && !compact;
+  const desktopHistoryVisible =
+    showDesktopHistoryPanel && isLargeScreen && chatHistoryOpen;
+
+  useEffect(() => {
+    if (historyEnabled) return;
+    setChatHistoryOpen(false);
+  }, [historyEnabled, setChatHistoryOpen]);
 
   useEffect(() => {
     if (!stream.error) {
@@ -385,20 +403,21 @@ export function Thread() {
 
   const chatStarted = !!threadId || !!messages.length;
   const showStandaloneHistoryToggle =
-    shouldShowStandaloneHistoryToggle(chatStarted);
+    historyEnabled && shouldShowStandaloneHistoryToggle(chatStarted);
   const hasNoAIOrToolMessages = !messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
-  const composerInsetLeft = isLargeScreen && chatHistoryOpen ? 320 : 0;
+  const composerInsetLeft = desktopHistoryVisible ? HISTORY_PANEL_WIDTH : 0;
   const historyPanelTransition: Transition = isLargeScreen
     ? { type: "spring", stiffness: 300, damping: 32 }
     : { duration: 0 };
-  const contentCenterOffset =
-    isLargeScreen && chatHistoryOpen ? HISTORY_PANEL_WIDTH / 2 : 0;
-  const reservedComposerSpace = Math.max(
-    composerHeight + (chatStarted ? 24 : 16),
-    chatStarted ? 220 : 240,
-  );
+  const contentCenterOffset = desktopHistoryVisible ? HISTORY_PANEL_WIDTH / 2 : 0;
+  const reservedComposerSpace = compact
+    ? Math.max(composerHeight + 12, 172)
+    : Math.max(
+        composerHeight + (chatStarted ? 24 : 16),
+        chatStarted ? 220 : 240,
+      );
 
   useEffect(() => {
     const node = composerDockRef.current;
@@ -421,8 +440,9 @@ export function Thread() {
   }, [chatHistoryOpen, chatStarted]);
 
   return (
-    <div className="relative flex h-screen w-full overflow-hidden">
-      <div className="relative hidden lg:flex">
+    <div className={cn("relative flex h-screen w-full overflow-hidden", compact && "bg-white")}>
+      {showDesktopHistoryPanel && (
+        <div className="relative hidden lg:flex">
         <motion.div
           className="absolute z-20 h-full overflow-hidden"
           style={{ width: HISTORY_PANEL_WIDTH }}
@@ -437,14 +457,16 @@ export function Thread() {
             <ThreadHistory />
           </div>
         </motion.div>
-      </div>
+        </div>
+      )}
+      {compact && historyEnabled && <ThreadHistory mobileOnly />}
 
       <motion.div
         className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
         layout={isLargeScreen}
         animate={{
-          marginLeft: chatHistoryOpen ? (isLargeScreen ? HISTORY_PANEL_WIDTH : 0) : 0,
-          width: chatHistoryOpen
+          marginLeft: desktopHistoryVisible ? HISTORY_PANEL_WIDTH : 0,
+          width: desktopHistoryVisible
             ? isLargeScreen
               ? `calc(100% - ${HISTORY_PANEL_WIDTH}px)`
               : "100%"
@@ -472,34 +494,39 @@ export function Thread() {
         )}
 
         <ThreadHeader
-          variant={chatStarted ? "chat" : "landing"}
+          variant={compact ? "chat" : chatStarted ? "chat" : "landing"}
           onResetThread={handleResetThread}
           className={cn(
             "relative z-10",
-            chatStarted
-              ? "px-[4.25rem] pb-2 pt-3.5 sm:px-[5.1rem] sm:pb-2 lg:px-8"
-              : "px-4 pb-2.5 pt-3.5 sm:px-6 lg:px-8",
+            compact
+              ? "px-3 pb-1.5 pt-2 sm:px-3 lg:px-3"
+              : chatStarted
+                ? "px-[4.25rem] pb-2 pt-3.5 sm:px-[5.1rem] sm:pb-2 lg:px-8"
+                : "px-4 pb-2.5 pt-3.5 sm:px-6 lg:px-8",
           )}
         />
 
         <StickToBottom className="relative flex-1 overflow-hidden">
           <StickyToBottomContent
             className={cn(
-              "absolute inset-0 px-4 sm:px-6 lg:px-8",
+              "absolute inset-0",
+              compact ? "px-3 sm:px-3 lg:px-3" : "px-4 sm:px-6 lg:px-8",
               chatStarted || !isLargeScreen ? "overflow-y-scroll" : "overflow-y-hidden",
               "[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/20 [&::-webkit-scrollbar-track]:bg-transparent",
             )}
             contentClassName={cn(
               "mx-auto flex w-full flex-col gap-[1.125rem]",
-              chatStarted
-                ? "max-w-[50.4rem] pt-3"
-                : "max-w-[50.4rem] pt-2.5",
+              compact
+                ? "max-w-full pt-1.5"
+                : chatStarted
+                  ? "max-w-[50.4rem] pt-3"
+                  : "max-w-[50.4rem] pt-2.5",
             )}
             contentStyle={{ paddingBottom: reservedComposerSpace }}
             content={
               <>
                 <AnimatePresence initial={false}>
-                  {!chatStarted && (
+                  {!chatStarted && !compact && (
                     <motion.div
                       key="landing-shell"
                       initial={{ opacity: 1, height: "auto" }}
@@ -548,11 +575,18 @@ export function Thread() {
             }
             footer={
               <ScrollToBottom
-                className="fixed left-1/2 z-30 -translate-x-1/2 animate-in fade-in-0 zoom-in-95"
-                style={{
-                  bottom: composerHeight + 24,
-                  marginLeft: contentCenterOffset,
-                }}
+                className={cn(
+                  "fixed z-30 animate-in fade-in-0 zoom-in-95",
+                  compact ? "" : "left-1/2 -translate-x-1/2",
+                )}
+                style={
+                  compact
+                    ? { bottom: composerHeight + 12, right: 12 }
+                    : {
+                        bottom: composerHeight + 24,
+                        marginLeft: contentCenterOffset,
+                      }
+                }
               />
             }
           />
@@ -564,10 +598,15 @@ export function Thread() {
           animate={{ left: composerInsetLeft }}
           transition={historyPanelTransition}
         >
-          <div className="bg-gradient-to-t from-bg-warm via-bg-warm-light/96 to-transparent px-4 pb-4 pt-6 sm:px-6 lg:px-8">
-            <div className="relative mx-auto w-full max-w-[50.4rem]">
+          <div
+            className={cn(
+              "bg-gradient-to-t from-bg-warm via-bg-warm-light/96 to-transparent",
+              compact ? "px-3 pb-3 pt-3 sm:px-3 lg:px-3" : "px-4 pb-4 pt-6 sm:px-6 lg:px-8",
+            )}
+          >
+            <div className={cn("relative mx-auto w-full", compact ? "max-w-full" : "max-w-[50.4rem]")}>
               <div ref={composerDockRef} className="pointer-events-auto">
-                {!chatStarted && (
+                {!chatStarted && !compact && (
                   <div className="mb-3.5 flex items-center gap-3.5 px-2">
                     <div className="h-px flex-1 bg-gradient-to-r from-transparent via-primary/28 to-primary/6" />
                     <span className="text-[13.5px] font-medium text-muted-foreground">
@@ -578,7 +617,10 @@ export function Thread() {
                 )}
 
                 <div
-                  className="surface-glass relative overflow-hidden rounded-[1.8rem] border transition-all duration-300"
+                  className={cn(
+                    "surface-glass relative overflow-hidden border transition-all duration-300",
+                    compact ? "rounded-[1.15rem]" : "rounded-[1.8rem]",
+                  )}
                   style={{
                     borderColor: composerFocused
                       ? "color-mix(in srgb, var(--primary) 36%, transparent)"
@@ -612,17 +654,29 @@ export function Thread() {
                           }
                         }}
                         placeholder={BRAND_COPY.composerPlaceholder}
-                        className="min-h-[100px] w-full resize-none bg-transparent text-[14.5px] leading-[1.65rem] text-foreground shadow-none outline-none placeholder:text-[14.5px] placeholder:text-muted-foreground/85 focus:outline-none"
+                        className={cn(
+                          "w-full resize-none bg-transparent text-[14.5px] leading-[1.65rem] text-foreground shadow-none outline-none placeholder:text-[14.5px] placeholder:text-muted-foreground/85 focus:outline-none",
+                          compact ? "min-h-[76px]" : "min-h-[100px]",
+                        )}
                       />
                     </div>
 
-                    <div className="flex flex-col gap-3.5 border-t border-primary/10 px-[1.125rem] py-[0.875rem] sm:flex-row sm:items-end sm:justify-between sm:px-5">
-                      <div className="space-y-1.5">
-                        <div className="flex items-start gap-2 text-[13px] leading-[1.35rem] text-muted-foreground">
-                          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-accent-gold" />
-                          <p>{BRAND_COPY.disclaimer}</p>
+                    <div
+                      className={cn(
+                        "flex border-t border-primary/10",
+                        compact
+                          ? "items-center justify-end px-3 py-2.5"
+                          : "flex-col gap-3.5 px-[1.125rem] py-[0.875rem] sm:flex-row sm:items-end sm:justify-between sm:px-5",
+                      )}
+                    >
+                      {!compact && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-start gap-2 text-[13px] leading-[1.35rem] text-muted-foreground">
+                            <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-accent-gold" />
+                            <p>{BRAND_COPY.disclaimer}</p>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       <div className="flex items-center gap-3 self-end sm:self-auto">
                         {stream.isLoading ? (
@@ -643,7 +697,7 @@ export function Thread() {
                             disabled={isLoading || !input.trim()}
                           >
                             <SendHorizontal className="size-4" />
-                            发送咨询
+                            {compact ? "发送" : "发送咨询"}
                           </Button>
                         )}
                       </div>
