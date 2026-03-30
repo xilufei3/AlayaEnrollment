@@ -53,10 +53,14 @@ docker compose exec nginx nginx -s reload
 
 **原因：** 旧系统使用的是 Flowise 内置的 `iframe.js`，会自动在页面右下角创建悬浮聊天按钮。当前系统是完整的 Next.js 聊天界面，不附带嵌入脚本，需自行编写。
 
-脚本放在 `web/public/` 目录后，Next.js 会将其作为静态文件对外提供，访问路径自动变为：
+脚本放在 `web/public/` 目录后，Next.js 会将其作为静态文件对外提供。
+
+> **注意：** Next.js 的 `public/` 目录不受 `basePath` 影响，文件始终从根路径 `/` 提供，不带 `/zs-ai` 前缀。
+
+访问路径为：
 
 ```
-http://<HOST>:8082/zs-ai/embed.js
+http://<HOST>:8082/embed.js
 ```
 
 **`web/public/embed.js` 内容：**
@@ -143,8 +147,8 @@ http://<HOST>:8082/zs-ai/embed.js
 })();
 ```
 
-同时将聊天气泡图标放到 `web/public/ai-chat.png`，它会以
-`http://<HOST>:8082/zs-ai/ai-chat.png` 对外提供。
+气泡图标使用项目已有的 `web/public/branding/sustech-logo.png`，
+访问路径为 `http://<HOST>:8082/branding/sustech-logo.png`（同样不带 `/zs-ai` 前缀），无需额外添加文件。
 
 ---
 
@@ -154,10 +158,10 @@ http://<HOST>:8082/zs-ai/embed.js
 
 ```html
 <script
-  src="http://<HOST>:8082/zs-ai/embed.js"
+  src="http://<HOST>:8082/embed.js"
   data-bot-src="http://<HOST>:8082/zs-ai/"
-  data-open-icon="http://<HOST>:8082/zs-ai/ai-chat.png"
-  data-close-icon="http://<HOST>:8082/zs-ai/ai-chat.png"
+  data-open-icon="http://<HOST>:8082/branding/sustech-logo.png"
+  data-close-icon="http://<HOST>:8082/branding/sustech-logo.png"
   data-drag="true"
   defer
 ></script>
