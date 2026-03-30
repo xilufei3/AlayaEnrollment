@@ -127,11 +127,12 @@ class GenerationComponent:
         system_prompt: str,
         user_prompt: str,
         model_id: str | None = None,
+        channel: str = "",
     ) -> str:
         """单轮短回复，用于 out_of_scope 等无需检索的场景。"""
         active_model_kind = model_id or self.model_id or "generation"
         try:
-            model = get_model(active_model_kind)
+            model = get_model(active_model_kind, channel=channel)
             datetime_suffix = self._current_datetime_hint()
             if datetime_suffix:
                 system_prompt = f"{system_prompt.strip()}\n\n{datetime_suffix}"
@@ -158,9 +159,10 @@ class GenerationComponent:
         messages: Sequence[Any] | None = None,
         model_id: str | None = None,
         system_suffix: str = "",
+        channel: str = "",
     ) -> str:
         active_model_kind = model_id or self.model_id or "generation"
-        model = get_model(active_model_kind)
+        model = get_model(active_model_kind, channel=channel)
         chunk_texts = self._chunk_texts(chunks)
         structured_text = self._structured_results_text(list(structured_results or []))
         has_context = bool(chunk_texts or structured_text)
@@ -274,6 +276,7 @@ def create_generation_node(*, model_id: str | None = None):
                 messages=messages_for_history,
                 model_id=runtime_model_id,
                 system_suffix=system_suffix,
+                channel=channel,
             )
             logger.debug(
                 "Generation done.\n"

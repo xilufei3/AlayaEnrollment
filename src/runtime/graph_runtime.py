@@ -88,6 +88,21 @@ def _read_env_bool(name: str, default: bool = False) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
+def _read_channel_rag_max_iterations(channel: str | None) -> int | None:
+    normalized = str(channel or "").strip().lower()
+    if not normalized:
+        return None
+    env_name = f"{normalized.upper()}_RAG_MAX_ITERATIONS"
+    raw = os.getenv(env_name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return max(0, value)
+
+
 def _langfuse_enabled() -> bool:
     return _read_env_bool("LANGFUSE_ENABLED", False)
 
@@ -960,6 +975,9 @@ class AdmissionGraphRuntime:
             }
             if channel:
                 initial_state["channel"] = channel
+                rag_max_iterations = _read_channel_rag_max_iterations(channel)
+                if rag_max_iterations is not None:
+                    initial_state["rag_max_iterations"] = rag_max_iterations
             try:
                 with lf_trace_context:
                     async for update in self._graph.astream(initial_state, config=config, stream_mode="updates"):

@@ -20,6 +20,7 @@ def create_direct_reply_node(*, model_id: str | None = None):
     async def direct_reply_node(state: WorkflowState, runtime: Runtime[Any]):
         query = shared_extract_query_from_state(state)
         intent = str(state.get("intent") or "").strip()
+        channel = str(state.get("channel") or "").strip().lower()
         runtime_model_id = getattr(getattr(runtime, "context", None), "chat_model_id", None)
         system_prompt, fallback_answer = get_direct_reply_prompt_bundle(intent)
 
@@ -28,6 +29,7 @@ def create_direct_reply_node(*, model_id: str | None = None):
             system_prompt=system_prompt,
             user_prompt=user,
             model_id=runtime_model_id,
+            channel=channel,
         )
         if not answer:
             answer = fallback_answer

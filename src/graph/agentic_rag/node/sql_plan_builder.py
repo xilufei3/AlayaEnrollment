@@ -172,11 +172,12 @@ async def _llm_build_sql_plan(
     intent: str,
     slots: dict[str, str],
     sql_candidate: SQLCandidate,
+    channel: str = "",
 ) -> SQLPlan:
     selected_tables = [str(item).strip() for item in list(sql_candidate.get("selected_tables") or []) if str(item).strip()]
     table_meta = _selected_table_meta(selected_tables)
     _, table_context = _selected_table_context(table_meta)
-    model = get_model(model_id)
+    model = get_model(model_id, channel=channel)
     user_prompt = "\n".join(
         [
             f"用户问题：{query}",
@@ -224,6 +225,7 @@ def create_sql_plan_builder_node(*, model_id: str | None = None):
         query = str(state.get("query") or "").strip()
         intent = str(state.get("intent") or "").strip()
         slots = dict(state.get("slots") or {})
+        channel = str(state.get("channel") or "").strip().lower()
         sql_candidate: SQLCandidate = state.get("sql_candidate") or {}
 
         if not bool(sql_candidate.get("enabled")):
@@ -245,6 +247,7 @@ def create_sql_plan_builder_node(*, model_id: str | None = None):
                 intent=intent,
                 slots=slots,
                 sql_candidate=sql_candidate,
+                channel=channel,
             )
         except ModelRequestTimeoutError:
             raise

@@ -85,6 +85,13 @@ def create_agentic_rag_node(
     )
 
     async def agentic_rag_node(state: Any) -> dict[str, Any]:
+        max_iterations_override_raw = state.get("rag_max_iterations")
+        try:
+            max_iterations_override = int(max_iterations_override_raw)
+        except (TypeError, ValueError):
+            max_iterations_override = max_iterations
+        effective_max_iterations = max(0, max_iterations_override)
+
         rag_input: RAGState = {
             "query": str(state.get("query") or "").strip(),
             "intent": str(state.get("intent") or "").strip(),
@@ -92,7 +99,7 @@ def create_agentic_rag_node(
             "slots": dict(state.get("slots") or {}),
             "required_slots": list(state.get("required_slots") or []),
             "rag_iteration": 0,
-            "max_iterations": max_iterations,
+            "max_iterations": effective_max_iterations,
             "search_plan": {},
             "sql_candidate": {},
             "sql_plan": {},
@@ -124,7 +131,8 @@ def create_agentic_rag_node(
             f"eval_result={eval_result}\n"
             f"chunks={len(chunks)}\n"
             f"structured_results={len(structured_results)}\n"
-            f"missing_slots={missing_slots}"
+            f"missing_slots={missing_slots}\n"
+            f"max_iterations={effective_max_iterations}"
         )
         return {
             "chunks": chunks,

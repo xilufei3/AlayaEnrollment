@@ -101,9 +101,10 @@ class EnrollmentIntentClassifier:
         query: str,
         conversation_context: Sequence[Any] = (),
         model_id: str | None = None,
+        channel: str = "",
     ) -> IntentClassificationResult:
         active_model_kind = model_id or self.model_id or "intent"
-        model = get_model(active_model_kind)
+        model = get_model(active_model_kind, channel=channel)
         system_prompt = self._prompt.format_prompt(
             intent_descriptions=json.dumps(INTENT_DESCRIPTIONS, ensure_ascii=False, indent=2),
             query_mode_descriptions=json.dumps(
@@ -183,10 +184,12 @@ def create_intent_classify_node(*, model_id: str | None = None):
 
         try:
             runtime_model_id = getattr(getattr(runtime, "context", None), "chat_model_id", None)
+            channel = str(state.get("channel") or "").strip().lower()
             result = await classifier.classify(
                 query=query,
                 conversation_context=conversation_context,
                 model_id=runtime_model_id,
+                channel=channel,
             )
             intent = result.intent
             query_mode = result.query_mode

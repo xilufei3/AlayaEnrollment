@@ -140,8 +140,9 @@ async def _llm_plan(
     iteration: int,
     eval_reason: str,
     chunks: list[Any] | None = None,
+    channel: str = "",
 ) -> tuple[SearchPlan, SQLCandidate]:
-    model = get_model(model_id)
+    model = get_model(model_id, channel=channel)
     user_parts = [
         f"用户问题：{query}",
         f"意图：{intent}",
@@ -207,6 +208,7 @@ def create_search_planner_node(*, model_id: str | None = None):
         iteration = int(state.get("rag_iteration") or 0)
         eval_reason = str(state.get("eval_reason") or "")
         chunks = list(state.get("chunks") or [])
+        channel = str(state.get("channel") or "").strip().lower()
 
         planner_model_kind = model_id or "planner"
 
@@ -221,6 +223,7 @@ def create_search_planner_node(*, model_id: str | None = None):
                     iteration=iteration,
                     eval_reason=eval_reason,
                     chunks=chunks,
+                    channel=channel,
                 )
             except ModelRequestTimeoutError:
                 raise

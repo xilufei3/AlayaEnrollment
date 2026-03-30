@@ -122,6 +122,7 @@ class SufficiencyEvaluator:
         intent: str,
         chunks: list[Document],
         structured_results: list[StructuredTableResult],
+        channel: str = "",
     ) -> dict[str, Any]:
         # 快速规则：无非结构化材料且无结构化结果时直接 insufficient_docs
         if not chunks and not structured_results:
@@ -138,6 +139,7 @@ class SufficiencyEvaluator:
                 intent=intent,
                 chunks=chunks,
                 structured_results=structured_results,
+                channel=channel,
             )
         except ModelRequestTimeoutError:
             raise
@@ -156,8 +158,9 @@ class SufficiencyEvaluator:
         intent: str,
         chunks: list[Document],
         structured_results: list[StructuredTableResult],
+        channel: str = "",
     ) -> dict[str, Any]:
-        model = get_model(self.model_id)
+        model = get_model(self.model_id, channel=channel)
         user_prompt = (
             f"用户问题：{query}\n"
             f"意图：{intent}\n"
@@ -202,6 +205,7 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
         query_mode = str(state.get("query_mode") or "").strip()
         chunks = list(state.get("chunks") or [])
         structured_results = list(state.get("structured_results") or [])
+        channel = str(state.get("channel") or "").strip().lower()
         iteration = int(state.get("rag_iteration") or 0)
         max_iter = int(state.get("max_iterations") or 2)
 
@@ -219,6 +223,7 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
             intent=intent,
             chunks=chunks,
             structured_results=structured_results,
+            channel=channel,
         )
         force_retry = _needs_default_extra_round(query_mode, iteration, max_iter)
         include_chunk_highlights = force_retry or (

@@ -71,7 +71,7 @@ NODE_MODEL_KIND_MAP: dict[str, str] = {
     "rerank": "rerank",
 }
 
-_MODEL_CACHE: dict[tuple[str, str], Any] = {}
+_MODEL_CACHE: dict[tuple[str, str, str], Any] = {}
 _MODEL_CACHE_LOCK = Lock()
 _MODEL_CONFIGS_CACHE: dict[str, dict[str, Any]] | None = None
 _MODEL_CONFIGS_LOCK = Lock()
@@ -280,6 +280,124 @@ def _env_int(name: str, default: int) -> int:
         return int(value)
     except ValueError:
         return default
+
+
+def _env_optional_str(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned if cleaned else None
+
+
+def _channel_env_value(*, channel: str, model_kind: str, suffix: str) -> str | None:
+    channel_key = channel.strip().upper()
+    kind_key = model_kind.strip().upper()
+    if not channel_key:
+        return None
+    for env_name in (f"{channel_key}_{kind_key}_{suffix}", f"{channel_key}_{suffix}"):
+        value = _env_optional_str(env_name)
+        if value is not None:
+            return value
+    return None
+
+
+def _channel_spec_overrides(
+    *,
+    channel: str,
+    model_kind: str,
+    spec: dict[str, Any],
+) -> dict[str, Any]:
+    normalized_channel = str(channel or "").strip().lower()
+    if not normalized_channel:
+        return {}
+
+    provider = str(spec.get("provider") or "").strip().lower()
+    if provider == "openai":
+        overrides: dict[str, Any] = {}
+        direct_map = {
+            "MODEL_NAME": "model",
+            "BASE_URL": "openai_api_base",
+            "API_KEY": "openai_api_key",
+        }
+        for env_suffix, spec_key in direct_map.items():
+            if value := _channel_env_value(
+                channel=normalized_channel,
+                model_kind=model_kind,
+                suffix=env_suffix,
+            ):
+                overrides[spec_key] = value
+
+        if value := _channel_env_value(
+            channel=normalized_channel,
+            model_kind=model_kind,
+            suffix="TEMPERATURE",
+        ):
+            try:
+                overrides["temperature"] = float(value)
+            except ValueError:
+                pass
+        if value := _channel_env_value(
+            channel=normalized_channel,
+            model_kind=model_kind,
+            suffix="MAX_TOKENS",
+        ):
+            try:
+                parsed = int(value)
+                if parsed > 0:
+                    overrides["max_tokens"] = parsed
+            except ValueError:
+                pass
+        if value := _channel_env_value(
+            channel=normalized_channel,
+            model_kind=model_kind,
+            suffix="TIMEOUT_SECONDS",
+        ):
+            try:
+                overrides["request_timeout"] = float(value)
+            except ValueError:
+                pass
+        if value := _channel_env_value(
+            channel=normalized_channel,
+            model_kind=model_kind,
+            suffix="MAX_RETRIES",
+        ):
+            try:
+                parsed = int(value)
+                if parsed >= 0:
+                    overrides["max_retries"] = parsed
+            except ValueError:
+                pass
+        return overrides
+
+    if provider == "jina":
+        overrides = {}
+        if value := _channel_env_value(
+            channel=normalized_channel,
+            model_kind=model_kind,
+            suffix="MODEL_NAME",
+        ):
+            overrides["model"] = value
+        if value := _channel_env_value(
+            channel=normalized_channel,
+            model_kind=model_kind,
+            suffix="API_KEY",
+        ):
+            overrides["jina_api_key"] = value
+        if value := _channel_env_value(
+            channel=normalized_channel,
+            model_kind=model_kind,
+            suffix="TOP_N",
+        ):
+            try:
+                parsed = int(value)
+                if parsed > 0:
+                    overrides["top_n"] = parsed
+            except ValueError:
+                pass
+        return overrides
+
+    return {}
 
 
 def _apply_request_budget(
@@ -508,9 +626,10 @@ def _build_model(*, model_kind: str, spec: dict[str, Any]) -> Any:
     raise ValueError(f"Unsupported model provider: {provider}")
 
 
-def get_model(kind: str, **overrides: Any) -> Any:
+def get_model(kind: str, channel: str | None = None, **overrides: Any) -> Any:
     resolved_kind = _resolve_model_kind_only(kind)
-    cache_key = (resolved_kind, _freeze_overrides(overrides))
+    normalized_channel = str(channel or "").strip().lower()
+    cache_key = (resolved_kind, normalized_channel, _freeze_overrides(overrides))
     cached = _MODEL_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -521,6 +640,14 @@ def get_model(kind: str, **overrides: Any) -> Any:
             return cached
 
         spec = dict(_get_cached_model_configs()[resolved_kind])
+        if normalized_channel:
+            spec.update(
+                _channel_spec_overrides(
+                    channel=normalized_channel,
+                    model_kind=resolved_kind,
+                    spec=spec,
+                )
+            )
         spec.update(overrides)
         model = _build_model(model_kind=resolved_kind, spec=spec)
         _MODEL_CACHE[cache_key] = model

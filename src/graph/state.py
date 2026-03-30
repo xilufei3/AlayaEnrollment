@@ -20,6 +20,7 @@ class WorkflowState(TypedDict, total=False):
     intent: str
     query_mode: str
     confidence: float
+    rag_max_iterations: int
 
     # Global slot memory + turn-specific slot needs
     slots: dict[str, str]
