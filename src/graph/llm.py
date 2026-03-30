@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import os
+import re
 import time
 from threading import Lock
 from typing import Any, AsyncIterator, Sequence
@@ -33,6 +34,10 @@ DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 DEFAULT_DEEPSEEK_MODEL_NAME = "deepseek-chat"
 DEFAULT_QWEN_BASE_URL = "https://star.sustech.edu.cn/service/model/qwen/v1"
 DEFAULT_QWEN_MODEL_NAME = "qwen3.5-397b-a17b-fp8"
+DEFAULT_QWEN35_BASE_URL = "https://star.sustech.edu.cn/service/model/qwen35/v1"
+DEFAULT_QWEN35_MODEL_NAME = "qwen3.5-35b-a3b"
+DEFAULT_MIROTHINKER_BASE_URL = "https://star.sustech.edu.cn/service/model/mirothinker/v1"
+DEFAULT_MIROTHINKER_MODEL_NAME = "mirothinker-1.7-235b-fp8"
 DEFAULT_JINA_MODEL_NAME = "jina-reranker-v3"
 DEFAULT_MODEL_KIND = "generation"
 DEFAULT_INTENT_REQUEST_TIMEOUT = 8.0
@@ -46,8 +51,9 @@ DEFAULT_PLANNER_MAX_RETRIES = 0
 DEFAULT_EVAL_MAX_RETRIES = 0
 DEFAULT_RERANK_MAX_RETRIES = 0
 
-DISABLE_THINKING_EXTRA_BODY: dict[str, Any] = {
-    "enable_thinking": False,
+QWEN35_DISABLE_THINKING_EXTRA_BODY: dict[str, Any] = {
+    "separate_reasoning": False,
+    "chat_template_kwargs": {"enable_thinking": False},
 }
 
 MODEL_KIND_ALIASES: dict[str, str] = {
@@ -300,6 +306,83 @@ def _apply_request_budget(
     return spec
 
 
+def _normalize_model_source(raw_value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", raw_value.strip().lower())
+    return re.sub(r"_+", "_", normalized).strip("_")
+
+
+def _source_env_prefix(source_name: str) -> str:
+    return _normalize_model_source(source_name).upper()
+
+
+def _should_disable_thinking_by_default(*, model_name: str) -> bool:
+    return _normalize_model_source(model_name) == "qwen3_5_35b_a3b"
+
+
+def _resolve_model_source_defaults(source_name: str) -> dict[str, str]:
+    normalized = _normalize_model_source(source_name)
+    if not normalized:
+        return {}
+
+    if normalized == "qwen":
+        return {
+            "base_url": _env_str(
+                "QWEN_BASE_URL",
+                _env_str("DEEPSEEK_BASE_URL", DEFAULT_QWEN_BASE_URL),
+            ),
+            "api_key": _env_str(
+                "QWEN_API_KEY",
+                _env_str("DEEPSEEK_API_KEY", "placeholder"),
+            ),
+            "model": _env_str(
+                "QWEN_MODEL_NAME",
+                _env_str("DEEPSEEK_MODEL_NAME", DEFAULT_QWEN_MODEL_NAME),
+            ),
+        }
+
+    if normalized == "deepseek":
+        return {
+            "base_url": _env_str("DEEPSEEK_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL),
+            "api_key": _env_str(
+                "DEEPSEEK_API_KEY",
+                _env_str("QWEN_API_KEY", "placeholder"),
+            ),
+            "model": _env_str("DEEPSEEK_MODEL_NAME", DEFAULT_DEEPSEEK_MODEL_NAME),
+        }
+
+    prefix = _source_env_prefix(normalized)
+
+    known_defaults: dict[str, tuple[str, str]] = {
+        "qwen35": (DEFAULT_QWEN35_BASE_URL, DEFAULT_QWEN35_MODEL_NAME),
+        "mirothinker": (DEFAULT_MIROTHINKER_BASE_URL, DEFAULT_MIROTHINKER_MODEL_NAME),
+    }
+    default_base_url, default_model_name = known_defaults.get(normalized, ("", ""))
+
+    base_url = _env_str(f"{prefix}_BASE_URL", default_base_url)
+    api_key = _env_str(f"{prefix}_API_KEY", "")
+    model_name = _env_str(f"{prefix}_MODEL_NAME", default_model_name)
+
+    missing: list[str] = []
+    if not base_url:
+        missing.append(f"{prefix}_BASE_URL")
+    if not model_name:
+        missing.append(f"{prefix}_MODEL_NAME")
+    if not api_key:
+        missing.append(f"{prefix}_API_KEY")
+
+    if missing:
+        missing_text = ", ".join(missing)
+        raise ValueError(
+            f"Model source '{source_name}' is selected but missing env vars: {missing_text}"
+        )
+
+    return {
+        "base_url": base_url,
+        "api_key": api_key,
+        "model": model_name,
+    }
+
+
 def _build_openai_spec(
     *,
     prefix: str,
@@ -309,23 +392,36 @@ def _build_openai_spec(
     default_max_retries: int,
     disable_thinking: bool = True,
 ) -> dict[str, Any]:
-    base_url = _env_str(
-        f"{prefix}_BASE_URL",
+    source_defaults = _resolve_model_source_defaults(_env_str(f"{prefix}_SOURCE", ""))
+    fallback_base_url = source_defaults.get(
+        "base_url",
         _env_str(
             "QWEN_BASE_URL",
             _env_str("DEEPSEEK_BASE_URL", DEFAULT_QWEN_BASE_URL),
         ),
     )
-    api_key = _env_str(
-        f"{prefix}_API_KEY",
+    fallback_api_key = source_defaults.get(
+        "api_key",
         _env_str("QWEN_API_KEY", _env_str("DEEPSEEK_API_KEY", "placeholder")),
     )
-    model_name = _env_str(
-        f"{prefix}_MODEL_NAME",
+    fallback_model_name = source_defaults.get(
+        "model",
         _env_str(
             "QWEN_MODEL_NAME",
             _env_str("DEEPSEEK_MODEL_NAME", DEFAULT_QWEN_MODEL_NAME),
         ),
+    )
+    base_url = _env_str(
+        f"{prefix}_BASE_URL",
+        fallback_base_url,
+    )
+    api_key = _env_str(
+        f"{prefix}_API_KEY",
+        fallback_api_key,
+    )
+    model_name = _env_str(
+        f"{prefix}_MODEL_NAME",
+        fallback_model_name,
     )
     max_tokens = _env_int(f"{prefix}_MAX_TOKENS", default_max_tokens or 0)
 
@@ -340,10 +436,10 @@ def _build_openai_spec(
         spec["max_tokens"] = max_tokens
     needs_disable_thinking = (
         disable_thinking
-        and ("qwen" in base_url.lower() or "qwen" in spec["model"].lower())
+        and _should_disable_thinking_by_default(model_name=spec["model"])
     )
     if needs_disable_thinking:
-        spec["extra_body"] = dict(DISABLE_THINKING_EXTRA_BODY)
+        spec["extra_body"] = deepcopy(QWEN35_DISABLE_THINKING_EXTRA_BODY)
     return _apply_request_budget(
         spec=spec,
         prefix=prefix,
@@ -543,10 +639,10 @@ __all__ = [
     "DEFAULT_MODEL_KIND",
     "DEFAULT_QWEN_BASE_URL",
     "DEFAULT_QWEN_MODEL_NAME",
-    "DISABLE_THINKING_EXTRA_BODY",
     "ModelRequestTimeoutError",
     "MODEL_KIND_ALIASES",
     "NODE_MODEL_KIND_MAP",
+    "QWEN35_DISABLE_THINKING_EXTRA_BODY",
     "build_model_configs",
     "get_llm",
     "get_llm_for_node",
