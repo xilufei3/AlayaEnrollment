@@ -16,6 +16,7 @@ from langgraph.runtime import Runtime
 from ...config.settings import HISTORY_LAST_K_TURNS
 from ..llm import ModelRequestTimeoutError, get_model
 from ..prompts.generation import (
+    QQ_SYSTEM_SUFFIX,
     WECHAT_SYSTEM_SUFFIX,
     build_generation_system_prompt,
     build_generation_user_prompt,
@@ -265,7 +266,12 @@ def create_generation_node(*, model_id: str | None = None):
             )
 
             channel = str(state.get("channel") or "").strip().lower()
-            system_suffix = WECHAT_SYSTEM_SUFFIX if channel == "wechat" else ""
+            if channel == "wechat":
+                system_suffix = WECHAT_SYSTEM_SUFFIX
+            elif channel == "qq":
+                system_suffix = QQ_SYSTEM_SUFFIX
+            else:
+                system_suffix = ""
 
             answer = await component.generate(
                 query=query,

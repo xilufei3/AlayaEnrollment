@@ -271,3 +271,34 @@ def test_generation_component_treats_structured_results_as_available_context(mon
     assert "admission_scores" in user_prompt
     assert "字段说明" in user_prompt
     assert "（本轮无可用参考材料）" not in user_prompt
+
+
+def test_generation_component_adds_qq_channel_format_suffix(monkeypatch):
+    class FakeModel:
+        def __init__(self):
+            self.requests = []
+
+        async def astream(self, request):
+            self.requests.append(request)
+            yield SimpleNamespace(content="测试回复")
+
+    fake_model = FakeModel()
+    monkeypatch.setattr(generation_module, "get_model", lambda *_args, **_kwargs: fake_model)
+
+    answer = asyncio.run(
+        generation_module.GenerationComponent().generate(
+            query="介绍一下综合评价招生",
+            intent="admission_policy",
+            query_mode="introduction",
+            chunks=[Document(page_content="综合评价招生采用 631 模式。")],
+            messages=[],
+            system_suffix=generation_module.QQ_SYSTEM_SUFFIX,
+            channel="qq",
+        )
+    )
+
+    assert answer == "测试回复"
+
+    system_prompt = fake_model.requests[0][0][1]
+    assert "## 渠道格式要求：QQ Bot" in system_prompt
+    assert "禁止任何 Markdown" in system_prompt
