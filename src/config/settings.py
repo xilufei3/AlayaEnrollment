@@ -286,6 +286,7 @@ class EmbeddingConfig:
 @dataclass
 class RerankConfig:
     model_id: str = "rerank"
+    enabled: bool = field(default_factory=lambda: _env_bool("RERANK_ENABLED", True))
     top_n: int = field(default_factory=lambda: int(os.getenv("RERANK_TOP_N", "8")))
 
 

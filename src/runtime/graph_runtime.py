@@ -306,11 +306,6 @@ import logging as _logging
 
 _startup_logger = _logging.getLogger("alaya.startup")
 
-# 必须设置的环境变量（值不能为空或 placeholder）
-_REQUIRED_ENV_VARS: tuple[str, ...] = (
-    "JINA_API_KEY",
-)
-
 # 至少其一必须设置
 _REQUIRED_ANY_ENV_GROUPS: tuple[tuple[str, ...], ...] = (
     (
@@ -339,13 +334,40 @@ _RECOMMENDED_ENV_VARS: tuple[str, ...] = (
 )
 
 
+def _env_enabled(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    return default
+
+
+def _is_missing_env_var(name: str) -> bool:
+    val = os.getenv(name, "").strip()
+    return not val or val == "placeholder"
+
+
+def _collect_required_rerank_env_vars() -> list[str]:
+    if not _env_enabled("RERANK_ENABLED", True):
+        return []
+
+    provider = os.getenv("RERANK_PROVIDER", "qwen").strip().lower() or "qwen"
+    if provider == "jina":
+        return ["JINA_API_KEY"] if _is_missing_env_var("JINA_API_KEY") else []
+    if provider == "qwen":
+        if _is_missing_env_var("RERANK_API_KEY") and _is_missing_env_var("QWEN_API_KEY"):
+            return ["RERANK_API_KEY | QWEN_API_KEY"]
+        return []
+    return [f"Unsupported RERANK_PROVIDER={provider!r}"]
+
+
 def _validate_required_env_vars() -> None:
     """Fail fast if critical environment variables are missing."""
-    missing: list[str] = []
-    for name in _REQUIRED_ENV_VARS:
-        val = os.getenv(name, "").strip()
-        if not val or val == "placeholder":
-            missing.append(name)
+    missing: list[str] = _collect_required_rerank_env_vars()
 
     for group in _REQUIRED_ANY_ENV_GROUPS:
         if not any(os.getenv(name, "").strip() for name in group):
