@@ -56,6 +56,7 @@ DEFAULT_EVAL_MAX_RETRIES = 0
 DEFAULT_RERANK_MAX_RETRIES = 0
 
 QWEN35_DISABLE_THINKING_EXTRA_BODY: dict[str, Any] = {
+    "enable_thinking": False,
     "separate_reasoning": False,
     "chat_template_kwargs": {"enable_thinking": False},
 }
@@ -531,7 +532,7 @@ def _source_env_prefix(source_name: str) -> str:
 
 
 def _should_disable_thinking_by_default(*, model_name: str) -> bool:
-    return _normalize_model_source(model_name) == "qwen3_5_35b_a3b"
+    return True
 
 
 def _resolve_model_source_defaults(source_name: str) -> dict[str, str]:

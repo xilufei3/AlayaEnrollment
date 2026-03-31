@@ -111,3 +111,16 @@ services:
     depends_on:
       - web
     restart: unless-stopped
+
+  qq-bot:
+    container_name: alaya-qq-bot
+    build:
+      context: ./qq_bot
+      dockerfile: Dockerfile
+    environment:
+      ALAYA_API_BASE: http://backend:8008
+      ALAYA_API_KEY: ${API_SHARED_KEY}
+      ALAYA_ALLOWED_GROUPS: ${QQ_ALLOWED_GROUPS:-[]}
+    depends_on:
+      - backend
+    restart: unless-stopped
