@@ -58,7 +58,7 @@
 | Docker + Docker Compose | Docker 24+ / Compose v2 | 所有服务容器化 |
 | 磁盘 | 10 GB 可用 | Milvus 索引 + MinIO 存储 |
 | 内存 | 4 GB+ | Milvus standalone 约占 2 GB |
-| 网络 | 可达外部 API | Qwen/DeepSeek API、Jina Reranker、Embedding 服务 |
+| 网络 | 可达外部 API | Qwen/DeepSeek API、Qwen Reranker、Embedding 服务 |
 
 裸机部署额外需要：Python 3.11+、Node.js 20+。
 
@@ -86,8 +86,11 @@ cp .env.example .env
 QWEN_API_KEY=your-qwen-key
 QWEN_BASE_URL=http://star.sustech.edu.cn/service/model/qwen35/v1
 
-# Jina Reranker
-JINA_API_KEY=your-jina-key
+# Reranker（默认 Qwen）
+RERANK_PROVIDER=qwen
+RERANK_MODEL_NAME=qwen3-rerank
+# 如需单独密钥可填写；留空时默认复用 QWEN_API_KEY
+RERANK_API_KEY=
 
 # BFF 共享密钥（生产环境务必修改）
 API_SHARED_KEY=your-random-secret-here
@@ -397,7 +400,7 @@ docker compose up --build -d    # 重新构建镜像并启动
 | 变量 | 说明 |
 |---|---|
 | `QWEN_API_KEY` | Qwen 模型密钥 |
-| `JINA_API_KEY` | Jina Reranker 密钥 |
+| `RERANK_API_KEY \| QWEN_API_KEY` | Reranker 密钥（默认复用 `QWEN_API_KEY`） |
 
 ### 强烈建议修改
 
@@ -414,6 +417,9 @@ docker compose up --build -d    # 重新构建镜像并启动
 | `DEEPSEEK_API_KEY` | 空 | DeepSeek 模型密钥（可替代 Qwen） |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek API 地址 |
 | `QWEN_BASE_URL` | `http://star.sustech.edu.cn/...` | Qwen API 地址 |
+| `RERANK_PROVIDER` | `qwen` | 文档重排 provider，支持 `qwen` / `jina` |
+| `RERANK_MODEL_NAME` | `qwen3-rerank` | 文档重排模型名 |
+| `RERANK_BASE_URL` | DashScope text-rerank API | Qwen 文档重排接口地址 |
 | `AlayaData_URL` | `http://100.64.0.30:6000` | Embedding 服务地址 |
 | `MILVUS_URI` | `http://localhost:19530` | Milvus 连接地址 |
 | `MILVUS_COLLECTION` | `admissions_knowledge` | 向量集合名 |
@@ -465,7 +471,8 @@ docker compose up -d
 
 ### Backend 启动时报 "Missing required environment variables"
 
-启动时会校验 `QWEN_API_KEY` 和 `JINA_API_KEY`，缺失则拒绝启动。确认 `.env` 已正确配置。
+启动时会校验 LLM 所需密钥，以及当前 rerank provider 对应的密钥。
+默认 `RERANK_PROVIDER=qwen` 时，需要 `QWEN_API_KEY` 或 `RERANK_API_KEY` 至少一个可用；如果切回 `RERANK_PROVIDER=jina`，则需要 `JINA_API_KEY`。
 
 ### 前端 502 / "Backend connection failed"
 

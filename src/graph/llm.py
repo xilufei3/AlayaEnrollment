@@ -9,9 +9,9 @@ from threading import Lock
 from typing import Any, AsyncIterator, Sequence
 
 from langchain_community.document_compressors import JinaRerank
-from langchain_community.document_compressors.jina_rerank import JINA_API_URL
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
+import requests
 
 
 def _record_llm_ok(model_kind: str, duration: float) -> None:
@@ -38,6 +38,10 @@ DEFAULT_QWEN35_BASE_URL = "https://star.sustech.edu.cn/service/model/qwen35/v1"
 DEFAULT_QWEN35_MODEL_NAME = "qwen3.5-35b-a3b"
 DEFAULT_MIROTHINKER_BASE_URL = "https://star.sustech.edu.cn/service/model/mirothinker/v1"
 DEFAULT_MIROTHINKER_MODEL_NAME = "mirothinker-1.7-235b-fp8"
+DEFAULT_QWEN_RERANK_BASE_URL = (
+    "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+)
+DEFAULT_QWEN_RERANK_MODEL_NAME = "qwen3-rerank"
 DEFAULT_JINA_MODEL_NAME = "jina-reranker-v3"
 DEFAULT_MODEL_KIND = "generation"
 DEFAULT_INTENT_REQUEST_TIMEOUT = 8.0
@@ -167,7 +171,7 @@ class _TimeoutAwareChatModel:
             self._raise_timeout(exc)
 
 
-class _TimeoutAwareJinaRerank:
+class _TimeoutAwareRerankModel:
     def __init__(
         self,
         *,
@@ -186,52 +190,14 @@ class _TimeoutAwareJinaRerank:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
 
-    def rerank(
-        self,
-        documents: Sequence[str | Document | dict[str, Any]],
-        query: str,
-        *,
-        model: str | None = None,
-        top_n: int | None = -1,
-        max_chunks_per_doc: int | None = None,
-    ) -> list[dict[str, Any]]:
-        _ = max_chunks_per_doc
-        if len(documents) == 0:
-            return []
-
-        docs = [
-            doc.page_content if isinstance(doc, Document) else doc for doc in documents
-        ]
-        model_name = model or self._inner.model
-        resolved_top_n = top_n if (top_n is None or top_n > 0) else self._inner.top_n
-        data = {
-            "query": query,
-            "documents": docs,
-            "model": model_name,
-            "top_n": resolved_top_n,
-        }
-
+    def _call_with_retry(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
         attempts = self._max_retries + 1
         start = time.monotonic()
         for attempt in range(attempts):
             try:
-                response = self._inner.session.post(
-                    JINA_API_URL,
-                    json=data,
-                    timeout=self._timeout_seconds,
-                )
-                payload = response.json()
-                if "results" not in payload:
-                    raise RuntimeError(payload["detail"])
-
+                result = func(*args, **kwargs)
                 _record_llm_ok(self._model_kind, time.monotonic() - start)
-                return [
-                    {
-                        "index": item["index"],
-                        "relevance_score": item["relevance_score"],
-                    }
-                    for item in payload["results"]
-                ]
+                return result
             except Exception as exc:
                 if _is_timeout_exception(exc):
                     if attempt + 1 < attempts:
@@ -247,20 +213,151 @@ class _TimeoutAwareJinaRerank:
 
         raise RuntimeError("unreachable")
 
+    def rerank(
+        self,
+        documents: Sequence[str | Document | dict[str, Any]],
+        query: str,
+        *,
+        model: str | None = None,
+        top_n: int | None = -1,
+        max_chunks_per_doc: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._call_with_retry(
+            self._inner.rerank,
+            documents=documents,
+            query=query,
+            model=model,
+            top_n=top_n,
+            max_chunks_per_doc=max_chunks_per_doc,
+        )
+
     def compress_documents(
         self,
         documents: Sequence[Document],
         query: str,
         callbacks: Any | None = None,
     ) -> Sequence[Document]:
-        _ = callbacks
-        compressed: list[Document] = []
-        for result in self.rerank(documents, query):
-            doc = documents[result["index"]]
-            doc_copy = Document(doc.page_content, metadata=deepcopy(doc.metadata))
-            doc_copy.metadata["relevance_score"] = result["relevance_score"]
-            compressed.append(doc_copy)
-        return compressed
+        kwargs: dict[str, Any] = {
+            "documents": documents,
+            "query": query,
+        }
+        if callbacks is not None:
+            kwargs["callbacks"] = callbacks
+        return self._call_with_retry(self._inner.compress_documents, **kwargs)
+
+
+class _QwenRerank:
+    def __init__(
+        self,
+        *,
+        model: str,
+        api_key: str,
+        base_url: str,
+        top_n: int | None = None,
+        request_timeout: float | None = None,
+    ) -> None:
+        self._model = model
+        self._api_key = api_key
+        self._base_url = base_url
+        self._top_n = top_n
+        self._request_timeout = request_timeout
+
+    @staticmethod
+    def _doc_text(doc: str | Document | dict[str, Any]) -> str:
+        if isinstance(doc, Document):
+            return doc.page_content
+        if isinstance(doc, dict):
+            return str(
+                doc.get("page_content")
+                or doc.get("content")
+                or doc.get("text")
+                or ""
+            )
+        return str(doc)
+
+    def rerank(
+        self,
+        documents: Sequence[str | Document | dict[str, Any]],
+        query: str,
+        *,
+        model: str | None = None,
+        top_n: int | None = -1,
+        max_chunks_per_doc: int | None = None,
+    ) -> list[dict[str, Any]]:
+        del max_chunks_per_doc
+
+        payload: dict[str, Any] = {
+            "model": model or self._model,
+            "input": {
+                "query": query,
+                "documents": [self._doc_text(doc) for doc in documents],
+            },
+            "parameters": {
+                "return_documents": True,
+            },
+        }
+        resolved_top_n = top_n if top_n is not None and top_n > 0 else self._top_n
+        if resolved_top_n is not None and resolved_top_n > 0:
+            payload["parameters"]["top_n"] = int(resolved_top_n)
+
+        response = requests.post(
+            self._base_url,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=self._request_timeout,
+        )
+        if not response.ok:
+            body = response.text.strip()
+            if len(body) > 500:
+                body = body[:500] + "..."
+            raise RuntimeError(
+                f"Qwen rerank request failed with HTTP {response.status_code}: {body}"
+            )
+
+        data = response.json()
+        results = data.get("output", {}).get("results")
+        if not isinstance(results, list):
+            raise ValueError("Qwen rerank response missing output.results")
+        return list(results)
+
+    def compress_documents(
+        self,
+        documents: Sequence[Document],
+        query: str,
+        callbacks: Any | None = None,
+    ) -> Sequence[Document]:
+        del callbacks
+
+        rerank_results = self.rerank(
+            documents=documents,
+            query=query,
+            top_n=self._top_n,
+        )
+        reranked_documents: list[Document] = []
+        total_documents = len(documents)
+
+        for result in rerank_results:
+            index = result.get("index")
+            if not isinstance(index, int) or not (0 <= index < total_documents):
+                raise ValueError(f"Qwen rerank returned invalid document index: {index!r}")
+
+            source_doc = documents[index]
+            metadata = dict(source_doc.metadata)
+            score = result.get("relevance_score")
+            if score is not None:
+                metadata.setdefault("relevance_score", score)
+                metadata.setdefault("rerank_score", score)
+            reranked_documents.append(
+                Document(
+                    page_content=source_doc.page_content,
+                    metadata=metadata,
+                )
+            )
+
+        return reranked_documents
 
 
 def _env_str(name: str, default: str) -> str:
@@ -367,8 +464,6 @@ def _resolve_model_source_defaults(source_name: str) -> dict[str, str]:
         missing.append(f"{prefix}_BASE_URL")
     if not model_name:
         missing.append(f"{prefix}_MODEL_NAME")
-    if not api_key:
-        missing.append(f"{prefix}_API_KEY")
 
     if missing:
         missing_text = ", ".join(missing)
@@ -376,11 +471,13 @@ def _resolve_model_source_defaults(source_name: str) -> dict[str, str]:
             f"Model source '{source_name}' is selected but missing env vars: {missing_text}"
         )
 
-    return {
+    resolved = {
         "base_url": base_url,
-        "api_key": api_key,
         "model": model_name,
     }
+    if api_key:
+        resolved["api_key"] = api_key
+    return resolved
 
 
 def _build_openai_spec(
@@ -448,13 +545,38 @@ def _build_openai_spec(
     )
 
 
+def _get_rerank_provider() -> str:
+    return _env_str("RERANK_PROVIDER", "qwen").lower()
+
+
 def _build_rerank_spec() -> dict[str, Any]:
-    spec: dict[str, Any] = {
-        "provider": "jina",
-        "model": _env_str("RERANK_MODEL_NAME", _env_str("JINA_MODEL_NAME", DEFAULT_JINA_MODEL_NAME)),
-        "jina_api_key": _env_str("JINA_API_KEY", "placeholder"),
-        "top_n": _env_int("RERANK_TOP_N", 5),
-    }
+    provider = _get_rerank_provider()
+    top_n = _env_int("RERANK_TOP_N", 5)
+
+    if provider == "qwen":
+        spec = {
+            "provider": "qwen",
+            "model": _env_str(
+                "RERANK_MODEL_NAME",
+                _env_str("QWEN_RERANK_MODEL_NAME", DEFAULT_QWEN_RERANK_MODEL_NAME),
+            ),
+            "api_key": _env_str("RERANK_API_KEY", _env_str("QWEN_API_KEY", "placeholder")),
+            "base_url": _env_str("RERANK_BASE_URL", DEFAULT_QWEN_RERANK_BASE_URL),
+            "top_n": top_n,
+        }
+    elif provider == "jina":
+        spec = {
+            "provider": "jina",
+            "model": _env_str(
+                "RERANK_MODEL_NAME",
+                _env_str("JINA_MODEL_NAME", DEFAULT_JINA_MODEL_NAME),
+            ),
+            "jina_api_key": _env_str("JINA_API_KEY", "placeholder"),
+            "top_n": top_n,
+        }
+    else:
+        raise ValueError(f"Unsupported rerank provider: {provider}")
+
     return _apply_request_budget(
         spec=spec,
         prefix="RERANK_MODEL",
@@ -594,7 +716,22 @@ def _build_model(*, model_kind: str, spec: dict[str, Any]) -> Any:
             jina_api_key=spec["jina_api_key"],
             top_n=spec.get("top_n"),
         )
-        return _TimeoutAwareJinaRerank(
+        return _TimeoutAwareRerankModel(
+            inner=reranker,
+            model_kind=model_kind,
+            provider=provider,
+            timeout_seconds=spec.get("request_timeout"),
+            max_retries=int(spec.get("max_retries") or 0),
+        )
+    if provider == "qwen":
+        reranker = _QwenRerank(
+            model=spec["model"],
+            api_key=spec["api_key"],
+            base_url=spec["base_url"],
+            top_n=spec.get("top_n"),
+            request_timeout=spec.get("request_timeout"),
+        )
+        return _TimeoutAwareRerankModel(
             inner=reranker,
             model_kind=model_kind,
             provider=provider,
@@ -639,6 +776,8 @@ __all__ = [
     "DEFAULT_MODEL_KIND",
     "DEFAULT_QWEN_BASE_URL",
     "DEFAULT_QWEN_MODEL_NAME",
+    "DEFAULT_QWEN_RERANK_BASE_URL",
+    "DEFAULT_QWEN_RERANK_MODEL_NAME",
     "ModelRequestTimeoutError",
     "MODEL_KIND_ALIASES",
     "NODE_MODEL_KIND_MAP",

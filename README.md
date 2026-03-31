@@ -99,7 +99,9 @@ python -m src.knowledge.manage query-admission-scores --province 安徽 --year 2
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `QWEN_API_KEY` | 是 | Qwen 模型密钥（启动时校验） |
-| `JINA_API_KEY` | 是 | Jina Reranker 密钥（启动时校验） |
+| `RERANK_PROVIDER` | 否 | 文档重排 provider，默认 `qwen` |
+| `RERANK_MODEL_NAME` | 否 | 文档重排模型名，默认 `qwen3-rerank` |
+| `RERANK_API_KEY` | 否 | 文档重排密钥；为空时默认复用 `QWEN_API_KEY` |
 | `API_SHARED_KEY` | 推荐 | BFF → Backend 的共享密钥 |
 | `MILVUS_URI` | 否 | 默认 `http://localhost:19530` |
 | `AlayaData_URL` | 否 | Embedding 服务地址 |

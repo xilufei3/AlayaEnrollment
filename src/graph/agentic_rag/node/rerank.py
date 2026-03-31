@@ -43,7 +43,7 @@ def _merge_candidate_vector_chunks(
     return merged
 
 
-class JinaRerankerComponent:
+class RerankerComponent:
     def __init__(self, *, model_id: str, top_n: Optional[int] = None) -> None:
         self.model_id = model_id
         self.top_n = top_n
@@ -87,7 +87,7 @@ class JinaRerankerComponent:
 
         if not query or not documents:
             logger.debug(
-                "JinaReranker short-circuit.\n"
+                "Reranker short-circuit.\n"
                 f"query_empty={not bool(query)} docs_empty={not bool(documents)}"
             )
             return documents
@@ -99,7 +99,7 @@ class JinaRerankerComponent:
             )
         )
         logger.debug(
-            "JinaReranker done.\n"
+            "Reranker done.\n"
             f"model={self.model_id}\n"
             f"top_n={self.top_n}\n"
             f"in={len(documents)}\n"
@@ -109,10 +109,12 @@ class JinaRerankerComponent:
 
 
 def create_rerank_node():
-    reranker = JinaRerankerComponent(
-        model_id=config.rerank.model_id,
-        top_n=config.rerank.top_n,
-    )
+    reranker = None
+    if config.rerank.enabled:
+        reranker = RerankerComponent(
+            model_id=config.rerank.model_id,
+            top_n=config.rerank.top_n,
+        )
 
     async def rerank_node(state: RAGState) -> dict[str, Any]:
         search_plan = state.get("search_plan") or {}
@@ -126,6 +128,13 @@ def create_rerank_node():
             logger.debug(
                 f"Rerank skipped: query_empty={not query}, vector_chunks_empty={not merged_vectors}"
             )
+            return {
+                "candidate_vector_chunks": merged_vectors,
+                "reranked_vector_chunks": merged_vectors,
+            }
+
+        if reranker is None:
+            logger.info("Rerank skipped: RERANK_ENABLED=false")
             return {
                 "candidate_vector_chunks": merged_vectors,
                 "reranked_vector_chunks": merged_vectors,

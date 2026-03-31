@@ -377,7 +377,7 @@ START
 
 职责：
 
-- 对候选文档做 Jina rerank 重排
+- 对候选文档做 rerank 重排（默认使用 Qwen）
 
 关键机制：
 
@@ -610,7 +610,7 @@ LLM 评估失败时，回退为：
    - 都通过 `ChatOpenAI` 兼容接口接入
    - 实际可指向 DeepSeek/Qwen 等兼容 OpenAI API 的服务
 2. `rerank`
-   - 使用 Jina reranker
+   - 默认使用 Qwen reranker，也兼容 Jina
 3. 每种模型都有独立超时和重试预算
 4. 所有模型实例会被缓存复用
 5. 一些节点会根据运行时上下文动态切换 `model_id`
@@ -782,7 +782,7 @@ for iteration in range(max_iterations):
 - `src/graph/agentic_rag/graph.py`：RAG 子图定义
 - `src/graph/agentic_rag/node/search_planner.py`：检索规划与 SQL 候选判定
 - `src/graph/agentic_rag/node/retrieval.py`：向量/混合检索
-- `src/graph/agentic_rag/node/rerank.py`：Jina 重排
+- `src/graph/agentic_rag/node/rerank.py`：文档重排
 - `src/graph/agentic_rag/node/sql_plan_builder.py`：结构化查询计划
 - `src/graph/agentic_rag/node/sql_query.py`：白名单 SQL 查询
 - `src/graph/agentic_rag/node/sufficiency_eval.py`：材料充分性评估
