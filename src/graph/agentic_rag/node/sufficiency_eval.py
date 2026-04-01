@@ -13,7 +13,6 @@ from ...structured_results import StructuredTableResult, format_structured_resul
 from ..schemas import RAGState
 
 logger = logging.getLogger(__name__)
-_FORCE_EXTRA_ROUND_QUERY_MODES = {"introduction", "factual_query"}
 
 
 def _chunk_summary(chunks: list[Document], max_chars: int = 20000) -> str:
@@ -83,24 +82,16 @@ def _extract_chunk_highlights(
     return highlights
 
 
-def _needs_default_extra_round(query_mode: str, iteration: int, max_iter: int) -> bool:
-    normalized_query_mode = str(query_mode or "").strip().lower()
-    return normalized_query_mode in _FORCE_EXTRA_ROUND_QUERY_MODES and iteration < 2 and iteration < max_iter
-
-
 def _compose_eval_reason(
     *,
     base_reason: str,
     chunks: list[Document],
     include_chunk_highlights: bool,
-    force_retry: bool,
 ) -> str:
     parts: list[str] = []
     normalized_reason = _normalize_text(base_reason)
     if normalized_reason:
         parts.append(normalized_reason)
-    if force_retry:
-        parts.append("当前问题属于介绍型/事实查询，默认补充一轮检索以扩展覆盖角度")
     if include_chunk_highlights:
         highlights = _extract_chunk_highlights(chunks)
         if highlights:
@@ -198,7 +189,6 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
     async def sufficiency_eval_node(state: RAGState) -> dict[str, Any]:
         query = str(state.get("query") or "").strip()
         intent = str(state.get("intent") or "").strip()
-        query_mode = str(state.get("query_mode") or "").strip()
         chunks = list(state.get("chunks") or [])
         structured_results = list(state.get("structured_results") or [])
         channel = str(state.get("channel") or "").strip().lower()
@@ -220,21 +210,16 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
             structured_results=structured_results,
             channel=channel,
         )
-        force_retry = _needs_default_extra_round(query_mode, iteration, max_iter)
-        include_chunk_highlights = force_retry or (
-            result["eval_result"] != "sufficient" and iteration < max_iter
-        )
+        eval_result = result["eval_result"]
+        include_chunk_highlights = eval_result != "sufficient" and iteration < max_iter
         eval_reason = _compose_eval_reason(
             base_reason=str(result.get("eval_reason", "")),
             chunks=chunks,
             include_chunk_highlights=include_chunk_highlights,
-            force_retry=force_retry,
         )
-        eval_result = "insufficient_docs" if force_retry else result["eval_result"]
         logger.debug(
             "SufficiencyEval done.\n"
             f"intent={intent}\n"
-            f"query_mode={query_mode}\n"
             f"chunks={len(chunks)}\n"
             f"structured_results={len(structured_results)}\n"
             f"eval_result={eval_result}\n"
