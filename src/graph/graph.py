@@ -41,7 +41,7 @@ def create_graph(
             "(an injected search backend with a search(...) method)"
         )
 
-    vector_top_k = int(init_args.get("vector_top_k", 8))
+    vector_top_k = int(init_args.get("vector_top_k", 12))
 
     graph = StateGraph(WorkflowState)
     graph.add_node("intent_classify", create_intent_classify_node())
