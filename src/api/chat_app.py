@@ -69,7 +69,6 @@ class ChatStreamRequest(BaseModel):
     session_id: str = Field(..., min_length=8, max_length=128, pattern=r"^[a-zA-Z0-9_\-]+$")
     message: str = Field(..., min_length=1, max_length=4000)
     trace_id: str | None = Field(default=None, max_length=128, pattern=r"^[a-zA-Z0-9_\-]*$")
-    channel: str | None = Field(default=None, max_length=32, pattern=r"^[a-zA-Z0-9_\-]*$")
 
 
 class ThreadCreateRequest(BaseModel):
@@ -750,7 +749,6 @@ def create_app() -> FastAPI:
         session_id = req.session_id.strip()
         message = req.message.strip()
         trace_id = (req.trace_id or "").strip()
-        channel = (req.channel or "").strip().lower()
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required")
         if not message:
@@ -759,11 +757,7 @@ def create_app() -> FastAPI:
         max_duration_seconds = app.state.stream_max_duration_seconds
 
         async def event_source() -> AsyncIterator[tuple[str, Any]]:
-            async for evt in rt.stream_stage_events(
-                session_id=session_id,
-                message=message,
-                channel=channel or None,
-            ):
+            async for evt in rt.stream_stage_events(session_id=session_id, message=message):
                 data = dict(evt["data"])
                 if trace_id:
                     data["trace_id"] = trace_id
