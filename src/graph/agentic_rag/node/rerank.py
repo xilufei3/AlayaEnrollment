@@ -12,36 +12,6 @@ from ..schemas import RAGState
 
 logger = logging.getLogger(__name__)
 
-_MAX_CANDIDATE_VECTOR_CHUNKS = 25
-
-
-def _doc_key(doc: Document) -> tuple[str, str]:
-    doc_id = str(doc.metadata.get("id", "")).strip()
-    if doc_id:
-        return ("id", doc_id)
-    return ("content", doc.page_content)
-
-
-def _merge_candidate_vector_chunks(
-    existing: list[Document],
-    incoming: list[Document],
-    *,
-    limit: int = _MAX_CANDIDATE_VECTOR_CHUNKS,
-) -> list[Document]:
-    merged: list[Document] = []
-    seen: set[tuple[str, str]] = set()
-
-    for doc in [*existing, *incoming]:
-        key = _doc_key(doc)
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(doc)
-        if len(merged) >= limit:
-            break
-
-    return merged
-
 
 class RerankerComponent:
     def __init__(self, *, model_id: str, top_n: Optional[int] = None) -> None:
@@ -120,40 +90,26 @@ def create_rerank_node():
         search_plan = state.get("search_plan") or {}
         rewritten_query = str(search_plan.get("vector_query") or "").strip()
         query = rewritten_query or str(state.get("query") or "").strip()
-        candidate_vector_chunks = list(state.get("candidate_vector_chunks") or [])
         vector_chunks = list(state.get("vector_chunks") or [])
-        merged_vectors = _merge_candidate_vector_chunks(candidate_vector_chunks, vector_chunks)
 
-        if not query or not merged_vectors:
+        if not query or not vector_chunks:
             logger.debug(
-                f"Rerank skipped: query_empty={not query}, vector_chunks_empty={not merged_vectors}"
+                f"Rerank skipped: query_empty={not query}, vector_chunks_empty={not vector_chunks}"
             )
-            return {
-                "candidate_vector_chunks": merged_vectors,
-                "reranked_vector_chunks": merged_vectors,
-            }
+            return {"chunks": vector_chunks}
 
         if reranker is None:
             logger.info("Rerank skipped: RERANK_ENABLED=false")
-            return {
-                "candidate_vector_chunks": merged_vectors,
-                "reranked_vector_chunks": merged_vectors,
-            }
+            return {"chunks": vector_chunks}
 
         try:
-            reranked = await reranker(query=query, docs=merged_vectors)
-            logger.debug(f"Rerank done. in={len(merged_vectors)} out={len(reranked)}")
-            return {
-                "candidate_vector_chunks": merged_vectors,
-                "reranked_vector_chunks": reranked,
-            }
+            reranked = await reranker(query=query, docs=vector_chunks)
+            logger.debug(f"Rerank done. in={len(vector_chunks)} out={len(reranked)}")
+            return {"chunks": reranked}
         except ModelRequestTimeoutError:
             raise
         except Exception as exc:
             logger.error(f"Rerank error {type(exc).__name__}: {exc}")
-            return {
-                "candidate_vector_chunks": merged_vectors,
-                "reranked_vector_chunks": merged_vectors,
-            }
+            return {"chunks": vector_chunks}
 
     return rerank_node

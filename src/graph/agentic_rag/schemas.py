@@ -48,8 +48,6 @@ class RAGState(TypedDict, total=False):
 
     # Retrieval intermediates
     vector_chunks: Annotated[list[Document], _overwrite]
-    candidate_vector_chunks: Annotated[list[Document], _overwrite]
-    reranked_vector_chunks: Annotated[list[Document], _overwrite]
     structured_results: Annotated[list[StructuredTableResult], _overwrite]
 
     # Final chunks returned to WorkflowState

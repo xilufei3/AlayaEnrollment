@@ -6,7 +6,6 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from ..llm import ModelRequestTimeoutError
-from .node.merge_context import create_merge_context_node
 from .node.rerank import create_rerank_node
 from .node.retrieval import create_retrieval_node
 from .node.search_planner import create_search_planner_node
@@ -29,15 +28,13 @@ def _compile_rag_graph(
     g.add_node("sql_plan_builder", create_sql_plan_builder_node(model_id=search_planner_model_id))
     g.add_node("sql_query", create_sql_query_node())
     g.add_node("rerank", create_rerank_node())
-    g.add_node("merge_context", create_merge_context_node())
 
     g.add_edge(START, "search_planner")
     g.add_edge("search_planner", "retrieval")
     g.add_edge("search_planner", "sql_plan_builder")
     g.add_edge("retrieval", "rerank")
     g.add_edge("sql_plan_builder", "sql_query")
-    g.add_edge(["rerank", "sql_query"], "merge_context")
-    g.add_edge("merge_context", END)
+    g.add_edge(["rerank", "sql_query"], END)
 
     return g.compile()
 
@@ -64,8 +61,6 @@ def create_agentic_rag_node(
             "sql_candidate": {},
             "sql_plan": {},
             "vector_chunks": [],
-            "candidate_vector_chunks": [],
-            "reranked_vector_chunks": [],
             "structured_results": [],
             "chunks": [],
         }
