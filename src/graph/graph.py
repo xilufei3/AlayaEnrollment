@@ -42,7 +42,6 @@ def create_graph(
         )
 
     vector_top_k = int(init_args.get("vector_top_k", 8))
-    rag_max_iterations = int(init_args.get("rag_max_iterations", 2))
 
     graph = StateGraph(WorkflowState)
     graph.add_node("intent_classify", create_intent_classify_node())
@@ -51,8 +50,6 @@ def create_graph(
         create_agentic_rag_node(
             retriever=retriever,
             top_k=vector_top_k,
-            max_iterations=rag_max_iterations,
-            eval_model_id="eval",
             search_planner_model_id="planner",
         ),
     )

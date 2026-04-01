@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from langchain_core.documents import Document
 
@@ -41,12 +41,10 @@ class RAGState(TypedDict, total=False):
     query_mode: Annotated[str, _overwrite]
     slots: Annotated[dict[str, str], _overwrite]
 
-    # Internal loop state
+    # Internal state
     search_plan: Annotated[SearchPlan, _overwrite]
     sql_candidate: Annotated[SQLCandidate, _overwrite]
     sql_plan: Annotated[SQLPlan, _overwrite]
-    rag_iteration: Annotated[int, _overwrite]
-    max_iterations: Annotated[int, _overwrite]
 
     # Retrieval intermediates
     vector_chunks: Annotated[list[Document], _overwrite]
@@ -54,9 +52,5 @@ class RAGState(TypedDict, total=False):
     reranked_vector_chunks: Annotated[list[Document], _overwrite]
     structured_results: Annotated[list[StructuredTableResult], _overwrite]
 
-    # Final chunks used by eval and returned to WorkflowState
+    # Final chunks returned to WorkflowState
     chunks: Annotated[list[Document], _overwrite]
-
-    # Sufficiency result returned to WorkflowState
-    eval_result: Annotated[Literal["sufficient", "insufficient_docs"], _overwrite]
-    eval_reason: Annotated[str, _overwrite]
