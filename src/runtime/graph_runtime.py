@@ -1023,9 +1023,6 @@ class AdmissionGraphRuntime:
                                 elif node_name == "agentic_rag":
                                     chunks = payload.get("chunks", []) or []
                                     summary["chunks_count"] = len(chunks)
-                                    missing = payload.get("missing_slots") or []
-                                    if missing:
-                                        summary["missing_slots"] = missing
                                 elif node_name in self._ANSWER_NODES:
                                     answer = str(payload.get("answer", "") or "")
                                     result_answer = answer

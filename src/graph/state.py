@@ -24,13 +24,9 @@ class WorkflowState(TypedDict, total=False):
 
     # Global slot memory + turn-specific slot needs
     slots: dict[str, str]
-    required_slots: list[str]
-    missing_slots: list[str]
 
     # Retrieval + generation
     chunks: list[Document]
     structured_results: list[StructuredTableResult]
-    citations: list[dict[str, str]]
-    retrieval_skipped: bool
 
     answer: str

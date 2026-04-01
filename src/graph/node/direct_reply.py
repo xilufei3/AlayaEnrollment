@@ -40,7 +40,7 @@ def create_direct_reply_node(*, model_id: str | None = None):
             query,
             len(answer),
         )
-        result: dict[str, Any] = {"answer": answer, "retrieval_skipped": True}
+        result: dict[str, Any] = {"answer": answer}
         if answer:
             result["messages"] = [AIMessage(content=answer)]
         return result

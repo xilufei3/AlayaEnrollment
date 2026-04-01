@@ -37,13 +37,8 @@ GLOBAL_SLOT_NAMES: tuple[str, ...] = ("province", "year")
 class IntentClassificationResult(BaseModel):
     intent: str = Field(..., description="intent label")
     query_mode: str = Field(..., description="question shape label")
-    reason: str = Field(..., description="short reason")
     confidence: float = Field(..., ge=0.0, le=1.0)
     slots: dict[str, str] = Field(default_factory=dict, description="extracted slots: province, year")
-    required_slots: list[str] = Field(
-        default_factory=list,
-        description="query-aware slots needed for a more precise answer",
-    )
 
 
 def normalize_slots(raw_slots: Any) -> dict[str, str]:
@@ -62,17 +57,6 @@ def normalize_slots(raw_slots: Any) -> dict[str, str]:
             slots[name] = text
     return slots
 
-
-def normalize_required_slots(raw_required_slots: Any) -> list[str]:
-    if not isinstance(raw_required_slots, list):
-        return []
-
-    required_slots: list[str] = []
-    for item in raw_required_slots:
-        name = str(item).strip().lower()
-        if name in GLOBAL_SLOT_NAMES and name not in required_slots:
-            required_slots.append(name)
-    return required_slots
 
 
 class EnrollmentIntentClassifier:
@@ -130,7 +114,6 @@ class EnrollmentIntentClassifier:
 
         intent = self._normalize_intent(str(data.get("intent", "")))
         query_mode = self._normalize_query_mode(str(data.get("query_mode", "")))
-        reason = str(data.get("reason", "")).strip()
         try:
             confidence = float(data.get("confidence", 0.0))
         except (TypeError, ValueError):
@@ -138,15 +121,12 @@ class EnrollmentIntentClassifier:
         confidence = max(0.0, min(1.0, confidence))
 
         slots = normalize_slots(data.get("slots"))
-        required_slots = normalize_required_slots(data.get("required_slots"))
 
         return IntentClassificationResult(
             intent=intent,
             query_mode=query_mode,
-            reason=reason,
             confidence=confidence,
             slots=slots,
-            required_slots=required_slots,
         )
 
 
@@ -195,15 +175,12 @@ def create_intent_classify_node(*, model_id: str | None = None):
             query_mode = result.query_mode
             confidence = result.confidence
             slots = dict(result.slots or {})
-            required_slots = list(result.required_slots or [])
             logger.debug(
                 "Intent classified.\n"
                 f"intent={result.intent}\n"
                 f"query_mode={result.query_mode}\n"
                 f"confidence={result.confidence:.2f}\n"
-                f"reason={result.reason}\n"
-                f"slots={slots}\n"
-                f"required_slots={required_slots}"
+                f"slots={slots}"
             )
         except ModelRequestTimeoutError:
             raise
@@ -212,7 +189,6 @@ def create_intent_classify_node(*, model_id: str | None = None):
             query_mode = DEFAULT_QUERY_MODE.value
             confidence = 0.0
             slots = {}
-            required_slots = []
             logger.warning(
                 "Intent classify failed, use fallback.\n"
                 f"error={type(exc).__name__}: {exc}\n"
@@ -237,8 +213,6 @@ def create_intent_classify_node(*, model_id: str | None = None):
             "query_mode": query_mode,
             "confidence": confidence,
             "slots": merged_slots,
-            "required_slots": required_slots,
-            "missing_slots": [],
         }
 
     return intent_classify_node

@@ -21,20 +21,17 @@ class SearchPlan(TypedDict, total=False):
 class SQLCandidate(TypedDict, total=False):
     enabled: bool
     selected_tables: list[str]
-    reason: str
 
 
 class TablePlan(TypedDict, total=False):
     table: str
     key_values: dict[str, list[str]]
-    reason: str
 
 
 class SQLPlan(TypedDict, total=False):
     enabled: bool
     table_plans: list[TablePlan]
     limit: int
-    reason: str
 
 
 class RAGState(TypedDict, total=False):
@@ -43,7 +40,6 @@ class RAGState(TypedDict, total=False):
     intent: Annotated[str, _overwrite]
     query_mode: Annotated[str, _overwrite]
     slots: Annotated[dict[str, str], _overwrite]
-    required_slots: Annotated[list[str], _overwrite]
 
     # Internal loop state
     search_plan: Annotated[SearchPlan, _overwrite]
@@ -63,5 +59,4 @@ class RAGState(TypedDict, total=False):
 
     # Sufficiency result returned to WorkflowState
     eval_result: Annotated[Literal["sufficient", "insufficient_docs"], _overwrite]
-    missing_slots: Annotated[list[str], _overwrite]
     eval_reason: Annotated[str, _overwrite]

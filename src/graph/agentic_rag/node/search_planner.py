@@ -27,7 +27,6 @@ _DEFAULT_SQL_LIMIT = 6
 
 class SearchPlanLLMOutput(BaseModel):
     rewritten_query: str = Field(default="", description="改写后的主检索查询")
-    reason: str = Field(default="", description="规划理由")
     sql_candidate: dict[str, Any] = Field(default_factory=dict, description="SQL 路由候选结果")
 
 
@@ -65,7 +64,6 @@ def _default_sql_candidate() -> SQLCandidate:
     return {
         "enabled": False,
         "selected_tables": [],
-        "reason": "默认不启用 SQL",
     }
 
 
@@ -74,7 +72,6 @@ def _default_sql_plan() -> SQLPlan:
         "enabled": False,
         "table_plans": [],
         "limit": _DEFAULT_SQL_LIMIT,
-        "reason": "尚未执行 SQL 查询计划构建",
     }
 
 
@@ -127,7 +124,6 @@ def _normalize_sql_candidate(data: Any) -> SQLCandidate:
     return {
         "enabled": enabled,
         "selected_tables": selected_tables,
-        "reason": str(data.get("reason", "")).strip(),
     }
 
 
@@ -178,7 +174,6 @@ async def _llm_plan(
 
     out = SearchPlanLLMOutput(
         rewritten_query=str(data.get("rewritten_query", query)).strip() or query,
-        reason=str(data.get("reason", "")).strip(),
         sql_candidate=dict(data.get("sql_candidate") or {}),
     )
     top_k_final = _get_top_k(intent, iteration)
@@ -193,7 +188,6 @@ async def _llm_plan(
         "SearchPlanner LLM done.\n"
         f"rewritten_query={out.rewritten_query[:60]}...\n"
         f"top_k={top_k_final}\n"
-        f"reason={out.reason}\n"
         f"sql_candidate={sql_candidate}"
     )
     return plan, sql_candidate

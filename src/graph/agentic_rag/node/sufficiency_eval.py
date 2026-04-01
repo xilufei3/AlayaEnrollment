@@ -128,7 +128,6 @@ class SufficiencyEvaluator:
         if not chunks and not structured_results:
             return {
                 "eval_result": "insufficient_docs",
-                "missing_slots": [],
                 "eval_reason": "检索结果为空",
             }
 
@@ -147,7 +146,6 @@ class SufficiencyEvaluator:
             logger.warning(f"SufficiencyEval LLM failed, fallback to insufficient_docs. {exc}")
             return {
                 "eval_result": "insufficient_docs",
-                "missing_slots": [],
                 "eval_reason": "大模型评估失败，回退后重试",
             }
 
@@ -179,7 +177,6 @@ class SufficiencyEvaluator:
                 logger.warning("SufficiencyEval: LLM returned invalid JSON, fallback insufficient_docs. content=%s", content[:200])
                 return {
                     "eval_result": "insufficient_docs",
-                    "missing_slots": [],
                     "eval_reason": "大模型返回的 JSON 无效",
                 }
         else:
@@ -191,7 +188,6 @@ class SufficiencyEvaluator:
 
         return {
             "eval_result": eval_result,
-            "missing_slots": [],
             "eval_reason": str(data.get("reason", "")),
         }
 
@@ -214,7 +210,6 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
             logger.debug(f"SufficiencyEval: max_iterations reached ({iteration} > {max_iter}), force sufficient.")
             return {
                 "eval_result": "sufficient",
-                "missing_slots": [],
                 "eval_reason": "已达到最大迭代次数",
             }
 
@@ -247,7 +242,6 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
         )
         return {
             "eval_result": eval_result,
-            "missing_slots": result["missing_slots"],
             "eval_reason": eval_reason,
         }
 

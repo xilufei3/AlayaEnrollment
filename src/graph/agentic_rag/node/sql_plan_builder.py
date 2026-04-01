@@ -14,12 +14,11 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SQL_LIMIT = 6
 
 
-def _default_sql_plan(reason: str) -> SQLPlan:
+def _default_sql_plan() -> SQLPlan:
     return {
         "enabled": False,
         "table_plans": [],
         "limit": _DEFAULT_SQL_LIMIT,
-        "reason": reason,
     }
 
 
@@ -105,7 +104,6 @@ def _fallback_table_plans(
             {
                 "table": table_name,
                 "key_values": key_values,
-                "reason": "根据已选表和已知槽位回退生成",
             }
         )
     return table_plans
@@ -139,7 +137,6 @@ def _normalize_table_plans(
             {
                 "table": table_name,
                 "key_values": key_values,
-                "reason": str(item.get("reason", "")).strip(),
             }
         )
         covered_tables.add(table_name)
@@ -158,7 +155,6 @@ def _normalize_table_plans(
             {
                 "table": table_name,
                 "key_values": key_values,
-                "reason": "根据已选表和已知槽位回退生成",
             }
         )
 
@@ -216,7 +212,6 @@ async def _llm_build_sql_plan(
         "enabled": bool(data.get("enabled")) and bool(table_plans),
         "table_plans": table_plans,
         "limit": limit,
-        "reason": str(data.get("reason", "")).strip(),
     }
 
 
@@ -229,7 +224,7 @@ def create_sql_plan_builder_node(*, model_id: str | None = None):
         sql_candidate: SQLCandidate = state.get("sql_candidate") or {}
 
         if not bool(sql_candidate.get("enabled")):
-            return {"sql_plan": _default_sql_plan("SQL 候选未启用")}
+            return {"sql_plan": _default_sql_plan()}
 
         selected_tables = [
             str(item).strip()
@@ -237,7 +232,7 @@ def create_sql_plan_builder_node(*, model_id: str | None = None):
             if str(item).strip()
         ]
         if not selected_tables:
-            return {"sql_plan": _default_sql_plan("没有选中的数据表")}
+            return {"sql_plan": _default_sql_plan()}
 
         active_model = model_id or "planner"
         try:
@@ -266,7 +261,6 @@ def create_sql_plan_builder_node(*, model_id: str | None = None):
                     slots,
                 ),
                 "limit": _DEFAULT_SQL_LIMIT,
-                "reason": "根据已选表和已知槽位回退生成",
             }
 
         logger.debug(

@@ -26,10 +26,8 @@ SQL_PLAN_BUILDER_SYSTEM_PROMPT = """
 - `enabled`: 布尔值
 - `table_plans`: 数组
 - `limit`: 整数
-- `reason`: 字符串
 
 `table_plans` 中的每一项必须包含：
 - `table`: 字符串
 - `key_values`: 对象
-- `reason`: 字符串
 """.strip()

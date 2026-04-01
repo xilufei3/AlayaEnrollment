@@ -97,7 +97,6 @@ def create_agentic_rag_node(
             "intent": str(state.get("intent") or "").strip(),
             "query_mode": str(state.get("query_mode") or "").strip(),
             "slots": dict(state.get("slots") or {}),
-            "required_slots": list(state.get("required_slots") or []),
             "rag_iteration": 0,
             "max_iterations": effective_max_iterations,
             "search_plan": {},
@@ -109,7 +108,6 @@ def create_agentic_rag_node(
             "structured_results": [],
             "chunks": [],
             "eval_result": "",
-            "missing_slots": list(state.get("missing_slots") or []),
             "eval_reason": "",
         }
 
@@ -119,10 +117,9 @@ def create_agentic_rag_node(
             raise
         except Exception as exc:
             logger.error(f"AgenticRAG sub-graph error {type(exc).__name__}: {exc}")
-            return {"chunks": [], "missing_slots": [], "structured_results": []}
+            return {"chunks": [], "structured_results": []}
 
         chunks = list(final_state.get("chunks") or [])
-        missing_slots = list(final_state.get("missing_slots") or [])
         structured_results = list(final_state.get("structured_results") or [])
         eval_result = str(final_state.get("eval_result") or "sufficient")
 
@@ -131,12 +128,10 @@ def create_agentic_rag_node(
             f"eval_result={eval_result}\n"
             f"chunks={len(chunks)}\n"
             f"structured_results={len(structured_results)}\n"
-            f"missing_slots={missing_slots}\n"
             f"max_iterations={effective_max_iterations}"
         )
         return {
             "chunks": chunks,
-            "missing_slots": missing_slots,
             "structured_results": structured_results,
         }
 

@@ -81,7 +81,6 @@ def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
 
         plan_top_k = int(plan.get("top_k") or top_k)
         search_mode = _resolve_search_mode(plan)
-        filter_expr = str(plan.get("filter_expr") or "").strip() or None
 
         try:
             start = time.monotonic()
@@ -89,7 +88,6 @@ def create_retrieval_node(*, retriever: Any | None = None, top_k: int = 8):
                 lambda: search_backend.search(
                     query=retrieval_query,
                     top_k=plan_top_k,
-                    filter_expr=filter_expr,
                     mode=search_mode,
                 )
             )
