@@ -19,8 +19,9 @@ import time
 import xml.etree.ElementTree as ET
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 _logger = logging.getLogger("alaya.wechat")
 
@@ -146,16 +147,81 @@ def _deliver_answer(entry: dict[str, Any], gh_id: str, openid: str) -> PlainText
     )
 
 
+# ── WeChat API helpers ────────────────────────────────────────────
+
+_WX_TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/token"
+_WX_MENU_URL = "https://api.weixin.qq.com/cgi-bin/menu/create"
+
+_WX_MENU = {
+    "button": [
+        {
+            "type": "view",
+            "name": "综评报名",
+            "url": "https://mp.weixin.qq.com/s/WeSo2JzCpgElIJX9250Bow",
+        },
+        {
+            "type": "view",
+            "name": "招生简章",
+            "url": "https://mp.weixin.qq.com/s/YRJlCvBZiLdviAFVB_Auaw",
+        },
+    ]
+}
+
+
+async def _get_access_token(appid: str, appsecret: str) -> str:
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(
+            _WX_TOKEN_URL,
+            params={"grant_type": "client_credential", "appid": appid, "secret": appsecret},
+        )
+    data = r.json()
+    if "access_token" not in data:
+        raise RuntimeError(f"Failed to get access_token: {data}")
+    return data["access_token"]
+
+
 # ── Route factory ─────────────────────────────────────────────────
 
 def mount_wechat_routes(app_state: Any) -> APIRouter:
     import os
 
     wechat_token = os.getenv("WECHAT_TOKEN", "").strip()
+    wechat_appid = os.getenv("WECHAT_APPID", "").strip()
+    wechat_appsecret = os.getenv("WECHAT_APPSECRET", "").strip()
     if not wechat_token:
         _logger.warning("WECHAT_TOKEN is empty — signature verification will reject all requests")
 
     router = APIRouter()
+
+    @router.post("/wx/admin/init-menu")
+    async def wx_init_menu(
+        request: Request,
+        token: str = Query("", alias="token"),
+    ) -> JSONResponse:
+        """One-time endpoint to create the WeChat custom menu via API.
+
+        Call with ?token=<WECHAT_APPSECRET> to authenticate.
+        """
+        if not token or token != wechat_appsecret:
+            raise HTTPException(status_code=403, detail="Invalid token")
+        if not wechat_appid or not wechat_appsecret:
+            raise HTTPException(status_code=500, detail="WECHAT_APPID / WECHAT_APPSECRET not configured")
+        try:
+            access_token = await _get_access_token(wechat_appid, wechat_appsecret)
+        except RuntimeError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(
+                _WX_MENU_URL,
+                params={"access_token": access_token},
+                json=_WX_MENU,
+            )
+        result = r.json()
+        if result.get("errcode", -1) != 0:
+            _logger.error("WeChat menu create failed: %s", result)
+        else:
+            _logger.info("WeChat menu created successfully")
+        return JSONResponse(result)
 
     @router.get("/wx")
     async def wx_verify(
@@ -181,20 +247,39 @@ def mount_wechat_routes(app_state: Any) -> APIRouter:
         msg = _parse_xml(body)
 
         msg_type = msg.get("MsgType", "")
-        if msg_type != "text":
-            return PlainTextResponse(
-                _text_reply(
-                    msg.get("ToUserName", ""),
-                    msg.get("FromUserName", ""),
-                    "您好，目前仅支持文字咨询，请直接输入您的问题~",
-                ),
-                media_type="application/xml",
-            )
-
         openid = msg.get("FromUserName", "")
         gh_id = msg.get("ToUserName", "")
-        content = msg.get("Content", "").strip()
-        msg_id = msg.get("MsgId", "")
+
+        if msg_type == "event":
+            event = msg.get("Event", "").upper()
+            if event == "SUBSCRIBE":
+                welcome = (
+                    "欢迎关注南方科技大学招生办公室官方微信！\n"
+                    "我们将与您分享南科大的办学特色、办学成就和招生政策，"
+                    "并为您第一时间推送南科大招生资讯。\n"
+                    "南科大2026年本科综合评价招生报名已经启动，"
+                    "报名网址 https://register.sustech.edu.cn\n"
+                    "让我们一起逐梦追光，向极而行！"
+                )
+                return PlainTextResponse(_text_reply(gh_id, openid, welcome), media_type="application/xml")
+            elif event in ("UNSUBSCRIBE", "VIEW"):
+                return PlainTextResponse("success")
+            elif event == "CLICK":
+                event_key = msg.get("EventKey", "").strip()
+                if not event_key:
+                    return PlainTextResponse("success")
+                content = event_key
+                msg_id = f"click_{int(time.time())}"
+            else:
+                return PlainTextResponse("success")
+        elif msg_type != "text":
+            return PlainTextResponse(
+                _text_reply(gh_id, openid, "您好，目前仅支持文字咨询，请直接输入您的问题~"),
+                media_type="application/xml",
+            )
+        else:
+            content = msg.get("Content", "").strip()
+            msg_id = msg.get("MsgId", "")
 
         if not openid or not content:
             return PlainTextResponse("success")

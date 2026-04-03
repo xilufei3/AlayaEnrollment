@@ -418,7 +418,7 @@ def create_app() -> FastAPI:
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        if request.url.path in {"/health", "/info", "/metrics", "/wx"}:
+        if request.url.path in {"/health", "/info", "/metrics"} or request.url.path.startswith("/wx"):
             return await call_next(request)
 
         if request.headers.get("x-api-key", "") != shared_key:
@@ -433,7 +433,7 @@ def create_app() -> FastAPI:
     async def enforce_device_rate_limit(request: Request, call_next):
         if request.method == "OPTIONS":
             return await call_next(request)
-        if request.url.path in {"/health", "/info", "/metrics", "/wx"}:
+        if request.url.path in {"/health", "/info", "/metrics"} or request.url.path.startswith("/wx"):
             return await call_next(request)
         device_id = request.headers.get("x-device-id", "").strip()
         if device_id and not await app.state.device_rate_limiter.check(device_id):
