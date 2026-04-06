@@ -191,34 +191,41 @@ def build_generation_user_prompt(
     query_mode: str,
     history: str,
     context: str,
+    qa_doc: "Document | None" = None,
 ) -> str:
     """
     构建生成节点的 user prompt。
- 
+
     context 为空时显式标注，防止模型将"无材料"误判为"材料待加载"
     而以训练知识兜底。
+    qa_doc 存在时注入最高优先级的 QA 直通块。
     """
     context_block = context.strip() or "（本轮无可用参考材料）"
- 
-    return f"""\
-## 用户问题
-{query}
- 
-## 问题形态
-{query_mode}
- 
-## 对话历史（用于理解上下文；用户自述的个人情况可作为个性化依据，但不可据此推断南科大学校信息）
-{history}
- 
-## 参考材料（事实依据的唯一来源）
-{context_block}
- 
-## 作答要求
-- 直接回答当前问题，不偏题。
-- 关于南科大的事实内容必须来自【参考材料】，禁止使用训练知识填充。
-- 用户自述的个人情况（省份、分数、选科等）可用于个性化作答，但不可据此推断南科大学校信息。
-- 若参考材料标注为"（本轮无可用参考材料）"，执行系统提示中的材料不足协议。
-- 仅当问题形态为 introduction 或 factual_query 时，可在同一主题下适度补充相关维度，\
-补充内容同样须来自参考材料。
-- 使用 SQL 结构化结果时，完整展示已返回字段，按字段说明的列顺序排列表头。\
-"""
+
+    parts: list[str] = []
+
+    if qa_doc is not None:
+        parts.append(
+            f"## 命中 QA（最高优先级）\n"
+            f"{qa_doc.page_content}\n\n"
+            f"直接输出其中 `A:` 后的答案原文作为完整回复，无需按后续结构重新组织。"
+        )
+
+    parts.append(f"## 用户问题\n{query}")
+    parts.append(f"## 问题形态\n{query_mode}")
+    parts.append(
+        f"## 对话历史（用于理解上下文；用户自述的个人情况可作为个性化依据，但不可据此推断南科大学校信息）\n{history}"
+    )
+    parts.append(f"## 参考材料（事实依据的唯一来源）\n{context_block}")
+    parts.append(
+        "## 作答要求\n"
+        "- 直接回答当前问题，不偏题。\n"
+        "- 关于南科大的事实内容必须来自【参考材料】，禁止使用训练知识填充。\n"
+        "- 用户自述的个人情况（省份、分数、选科等）可用于个性化作答，但不可据此推断南科大学校信息。\n"
+        '- 若参考材料标注为\u201c（本轮无可用参考材料）\u201d，执行系统提示中的材料不足协议。\n'
+        "- 仅当问题形态为 introduction 或 factual_query 时，可在同一主题下适度补充相关维度，"
+        "补充内容同样须来自参考材料。\n"
+        "- 使用 SQL 结构化结果时，完整展示已返回字段，按字段说明的列顺序排列表头。"
+    )
+
+    return "\n\n".join(parts)

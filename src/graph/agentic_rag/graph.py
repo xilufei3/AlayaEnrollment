@@ -122,17 +122,20 @@ def create_agentic_rag_node(
         chunks = list(final_state.get("chunks") or [])
         structured_results = list(final_state.get("structured_results") or [])
         eval_result = str(final_state.get("eval_result") or "sufficient")
+        qa_doc = final_state.get("qa_doc")
 
         logger.debug(
             "AgenticRAG done.\n"
             f"eval_result={eval_result}\n"
             f"chunks={len(chunks)}\n"
             f"structured_results={len(structured_results)}\n"
+            f"qa_doc={'yes' if qa_doc else 'no'}\n"
             f"max_iterations={effective_max_iterations}"
         )
         return {
             "chunks": chunks,
             "structured_results": structured_results,
+            "qa_doc": qa_doc,
         }
 
     return agentic_rag_node

@@ -160,6 +160,7 @@ class GenerationComponent:
         model_id: str | None = None,
         system_suffix: str = "",
         channel: str = "",
+        qa_doc: Any = None,
     ) -> str:
         active_model_kind = model_id or self.model_id or "generation"
         model = get_model(active_model_kind, channel=channel)
@@ -186,6 +187,7 @@ class GenerationComponent:
             query_mode=query_mode,
             history=history,
             context=context,
+            qa_doc=qa_doc,
         )
 
         request = [("system", system_prompt), ("user", user_prompt)]
@@ -258,6 +260,7 @@ def create_generation_node(*, model_id: str | None = None):
             runtime_model_id = getattr(getattr(runtime, "context", None), "chat_model_id", None)
 
             chunks = state.get("chunks") or []
+            qa_doc = state.get("qa_doc")
             messages_for_history = _messages_for_history(
                 messages_full,
                 query=query,
@@ -277,6 +280,7 @@ def create_generation_node(*, model_id: str | None = None):
                 model_id=runtime_model_id,
                 system_suffix=system_suffix,
                 channel=channel,
+                qa_doc=qa_doc,
             )
             logger.debug(
                 "Generation done.\n"

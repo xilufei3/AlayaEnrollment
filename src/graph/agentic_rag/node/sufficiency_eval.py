@@ -120,6 +120,7 @@ class SufficiencyEvaluator:
             return {
                 "eval_result": "insufficient_docs",
                 "eval_reason": "检索结果为空",
+                "qa_doc": None,
             }
 
         # LLM 只判断文档充分性（sufficient / insufficient_docs）
@@ -138,7 +139,22 @@ class SufficiencyEvaluator:
             return {
                 "eval_result": "insufficient_docs",
                 "eval_reason": "大模型评估失败，回退后重试",
+                "qa_doc": None,
             }
+
+    @staticmethod
+    def _parse_qa_doc(data: dict[str, Any], query: str) -> Document | None:
+        raw = data.get("qa_doc")
+        if not raw or not isinstance(raw, dict):
+            return None
+        question = str(raw.get("question") or "").strip()
+        answer = str(raw.get("answer") or "").strip()
+        if not question or not answer:
+            return None
+        return Document(
+            page_content=f"Q: {question}\nA: {answer}",
+            metadata={"qa_extracted": True, "qa_source": "eval_llm", "original_query": query},
+        )
 
     async def _llm_evaluate(
         self,
@@ -151,10 +167,10 @@ class SufficiencyEvaluator:
     ) -> dict[str, Any]:
         model = get_model(self.model_id, channel=channel)
         user_prompt = (
-            f"用户问题：{query}\n"
+            f"原始用户问题：{query}\n"
             f"意图：{intent}\n"
             f"可用材料摘要：\n{_material_summary(chunks=chunks, structured_results=structured_results)}\n"
-            "请评估这些材料是否足以直接回答用户。"
+            "请评估这些材料是否足以直接回答用户，并提取匹配的 QA 条目（如有）。"
         )
         response = await model.ainvoke(
             [("system", SUFFICIENCY_EVAL_SYSTEM_PROMPT), ("user", user_prompt)],
@@ -169,6 +185,7 @@ class SufficiencyEvaluator:
                 return {
                     "eval_result": "insufficient_docs",
                     "eval_reason": "大模型返回的 JSON 无效",
+                    "qa_doc": None,
                 }
         else:
             data = content
@@ -180,6 +197,7 @@ class SufficiencyEvaluator:
         return {
             "eval_result": eval_result,
             "eval_reason": str(data.get("reason", "")),
+            "qa_doc": self._parse_qa_doc(data, query),
         }
 
 
@@ -201,6 +219,7 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
             return {
                 "eval_result": "sufficient",
                 "eval_reason": "已达到最大迭代次数",
+                "qa_doc": None,
             }
 
         result = await evaluator.evaluate(
@@ -210,7 +229,11 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
             structured_results=structured_results,
             channel=channel,
         )
+        qa_doc = result.get("qa_doc")
         eval_result = result["eval_result"]
+        # 命中 QA 直接视为 sufficient，无需继续检索
+        if qa_doc is not None:
+            eval_result = "sufficient"
         include_chunk_highlights = eval_result != "sufficient" and iteration < max_iter
         eval_reason = _compose_eval_reason(
             base_reason=str(result.get("eval_reason", "")),
@@ -223,11 +246,13 @@ def create_sufficiency_eval_node(*, model_id: str | None = None):
             f"chunks={len(chunks)}\n"
             f"structured_results={len(structured_results)}\n"
             f"eval_result={eval_result}\n"
+            f"qa_doc={'yes' if qa_doc else 'no'}\n"
             f"reason={eval_reason}"
         )
         return {
             "eval_result": eval_result,
             "eval_reason": eval_reason,
+            "qa_doc": qa_doc,
         }
 
     return sufficiency_eval_node

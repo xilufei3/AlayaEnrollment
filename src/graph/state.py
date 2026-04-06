@@ -28,5 +28,6 @@ class WorkflowState(TypedDict, total=False):
     # Retrieval + generation
     chunks: list[Document]
     structured_results: list[StructuredTableResult]
+    qa_doc: Document | None
 
     answer: str

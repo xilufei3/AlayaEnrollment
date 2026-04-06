@@ -60,3 +60,6 @@ class RAGState(TypedDict, total=False):
     # Sufficiency result returned to WorkflowState
     eval_result: Annotated[Literal["sufficient", "insufficient_docs"], _overwrite]
     eval_reason: Annotated[str, _overwrite]
+
+    # QA doc extracted by eval node (None if no match)
+    qa_doc: Annotated[Document | None, _overwrite]

@@ -38,6 +38,8 @@ DEFAULT_QWEN35_BASE_URL = "https://star.sustech.edu.cn/service/model/qwen35/v1"
 DEFAULT_QWEN35_MODEL_NAME = "qwen3.5-35b-a3b"
 DEFAULT_MIROTHINKER_BASE_URL = "https://star.sustech.edu.cn/service/model/mirothinker/v1"
 DEFAULT_MIROTHINKER_MODEL_NAME = "mirothinker-1.7-235b-fp8"
+DEFAULT_GEMMA4_BASE_URL = "http://172.18.41.222:18331/v1"
+DEFAULT_GEMMA4_MODEL_NAME = "gemma-4-26b-a4b-it"
 DEFAULT_QWEN_RERANK_BASE_URL = (
     "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
 )
@@ -571,6 +573,7 @@ def _resolve_model_source_defaults(source_name: str) -> dict[str, str]:
     known_defaults: dict[str, tuple[str, str]] = {
         "qwen35": (DEFAULT_QWEN35_BASE_URL, DEFAULT_QWEN35_MODEL_NAME),
         "mirothinker": (DEFAULT_MIROTHINKER_BASE_URL, DEFAULT_MIROTHINKER_MODEL_NAME),
+        "gemma4": (DEFAULT_GEMMA4_BASE_URL, DEFAULT_GEMMA4_MODEL_NAME),
     }
     default_base_url, default_model_name = known_defaults.get(normalized, ("", ""))
 
