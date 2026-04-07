@@ -156,13 +156,28 @@ _WX_MENU = {
     "button": [
         {
             "type": "view",
-            "name": "综评报名",
-            "url": "https://mp.weixin.qq.com/s/WeSo2JzCpgElIJX9250Bow",
+            "name": "走进南科",
+            "url": "https://mp.weixin.qq.com/s/WyU8kvhAyqsVxbNrQH35CQ",
+        },
+        {
+            "name": "报考指南",
+            "sub_button": [
+                {
+                    "type": "view",
+                    "name": "综评报名",
+                    "url": "https://mp.weixin.qq.com/s/WeSo2JzCpgElIJX9250Bow?click_id=7",
+                },
+                {
+                    "type": "view",
+                    "name": "招生简章",
+                    "url": "https://mp.weixin.qq.com/s/YRJlCvBZiLdviAFVB_Auaw?click_id=8",
+                },
+            ],
         },
         {
             "type": "view",
-            "name": "招生简章",
-            "url": "https://mp.weixin.qq.com/s/YRJlCvBZiLdviAFVB_Auaw",
+            "name": "网上报名",
+            "url": "https://register.sustech.edu.cn",
         },
     ]
 }
