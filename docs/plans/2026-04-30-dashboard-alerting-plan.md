@@ -69,6 +69,15 @@ Sentry，可选
 - Grafana：给研发和运维看请求量、错误率、P95/P99、RAG/LLM/SQL/检索/Embedding、容器状态和告警状态。
 - Alertmanager：负责自动告警、分组、静默、恢复通知和通知路由。
 
+## 关键设计约束
+
+以下约束直接影响后续实现质量，建议在 MVP 设计阶段就明确：
+
+1. Graph node 指标应在 LangGraph node 调度边界统一插桩。当前主链路和 Agentic RAG 子链路都基于 `StateGraph`，如果把 `observe()` / `inc()` 分散写进每个 node 函数，容易漏记异常分支和新增节点。应优先使用统一 node wrapper、装饰器或 callback 记录 node 名称、状态和耗时。
+2. `/admin/dashboard/summary` 只能承接轻量快照查询。`total_users`、`total_threads`、`total_messages` 这类聚合如果长期直接扫 SQLite 或做 `COUNT(DISTINCT ...)`，数据量上来后会拖慢线上库；趋势数据应交给 Prometheus/Grafana，快照数据优先来自预聚合统计表或缓存快照。
+3. 合成探测必须和真实用户流量隔离。探测会真实消耗 LLM token、向量检索和 SQL 资源，入口请求需要带固定标识，日志、trace、指标和 admin 统计都要能过滤 synthetic 流量。
+4. P0 告警不能只依赖 backend webhook。`Alertmanager -> POST /admin/alerts/webhook -> QQ bot` 可以作为补充渠道，但 `backend down` 这类 P0 告警必须至少有一条不经过 backend 自身的通知路径。
+
 ## 数据看板功能范围
 
 ### 1. 系统健康总览
@@ -203,6 +212,8 @@ GRAPH_NODE_DURATION = Histogram(
 - 统一包装层负责记录 `node`、`status`、duration，并在异常路径上保证失败指标一定被记录。
 - 这样可以避免节点遗漏、异常分支漏记，以及后续新增 node 时维护成本不断上升。
 - 文档和实现里需要明确“插桩点位在 LangGraph node 调度边界，而不是散落在业务 node 函数内部”。
+- 主图和 Agentic RAG 子图都要覆盖，避免只看到 `agentic_rag` 总耗时而看不到 `search_planner`、`retrieval`、`sql_query`、`rerank`、`merge_context`、`sufficiency_eval` 等子节点耗时。
+- 指标里的 `node` label 使用稳定业务节点名；如果实现内部节点名较泛，例如 `eval`，建议映射为 `sufficiency_eval`，避免 Grafana 面板含义不清。
 
 ### 4. 用户与会话运营看板
 
@@ -417,6 +428,7 @@ ingest_runs_total{status}
 - 这些高基数字段应该进入日志或 trace。
 - `device_id` 写入日志时继续脱敏。
 - 对合成探测流量要单独打标，例如 `request_source=synthetic` 写入日志或 trace，必要时在指标侧增加低基数来源维度，确保可以与真实用户流量区分。
+- 如果指标需要同时服务真实用户看板和合成探测告警，可以增加低基数 `request_source` label，取值限制为 `user`、`synthetic`、`unknown`，不要使用任意 header 原值。
 
 ### 第 2 步：统一错误记录
 
@@ -744,6 +756,7 @@ POST /admin/alerts/webhook
 - P0 告警至少保留一条不依赖 backend 自身的通知路径，例如 Alertmanager 直连企业微信、飞书或钉钉。
 - QQ bot 适合作为补充渠道，承接 P1/P2/P3 或作为辅助抄送。
 - 如果同时保留方案 A 和方案 B，需要在 Alertmanager 路由中明确不同 severity 的发送策略。
+- 推荐路由策略：P0 同时发送到直连通知渠道和 QQ 补充渠道；P1 可双发或优先 QQ；P2/P3 走聚合后的 QQ/监控群通知。
 
 #### 方案 C：接入 Sentry
 
@@ -833,7 +846,7 @@ GET /admin/dashboard/summary
 隔离要求：
 
 - 合成探测会实际触发 LLM 调用、向量检索和可能的 SQL 查询，必须明确它会消耗真实 token 和计算资源。
-- 合成探测请求需要带明确标识，例如专用 header、固定 `device_id`、或 `request_source=synthetic` 之类的低基数字段。
+- 合成探测请求需要带明确标识，例如 `X-Alaya-Request-Source: synthetic`、固定 `device_id`、或 `request_source=synthetic` 之类的低基数字段，并写入 request metadata。
 - 指标、日志、trace 和统计接口都要能区分这类流量，避免把探测请求混入正常用户请求的错误率、耗时和使用量统计。
 - 告警规则应明确哪些指标包含合成探测，哪些默认排除合成探测，避免既影响真实业务面板，又影响探测本身的告警判断。
 - 如果后续做成本分析，还应单独统计 synthetic 流量的调用量和 token 消耗。
