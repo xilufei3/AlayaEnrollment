@@ -84,3 +84,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 export async function POST(request: NextRequest): Promise<Response> {
   return proxyRequest(request);
 }
+
+export async function DELETE(request: NextRequest): Promise<Response> {
+  return proxyRequest(request);
+}

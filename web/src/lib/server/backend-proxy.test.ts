@@ -13,6 +13,8 @@ test("isAllowedProxyPath accepts supported LangGraph endpoints", () => {
   assert.equal(isAllowedProxyPath(["threads", "abc", "runs", "stream"]), true);
   assert.equal(isAllowedProxyPath(["runs", "stream"]), true);
   assert.equal(isAllowedProxyPath(["info"]), true);
+  assert.equal(isAllowedProxyPath(["admin", "conversations"]), true);
+  assert.equal(isAllowedProxyPath(["admin", "conversations", "thread-1"]), true);
   assert.equal(isAllowedProxyPath(["secret", "admin"]), false);
 });
 
@@ -33,6 +35,7 @@ test("buildUpstreamHeaders drops browser supplied x-api-key", () => {
 test("toUpstreamPath maps browser api segments to upstream LangGraph paths", () => {
   assert.equal(toUpstreamPath(["threads", "thread-1", "runs", "stream"]), "/threads/thread-1/runs/stream");
   assert.equal(toUpstreamPath(["threads", "thread-1", "state"]), "/threads/thread-1/state");
+  assert.equal(toUpstreamPath(["admin", "conversations", "thread-1"]), "/admin/conversations/thread-1");
   assert.equal(toUpstreamPath(["runs", "stream"]), "/runs/stream");
   assert.equal(toUpstreamPath(["info"]), "/info");
 });

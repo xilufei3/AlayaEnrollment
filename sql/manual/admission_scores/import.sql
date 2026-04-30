@@ -291,6 +291,22 @@ INSERT INTO admission_scores (
     ),
     (
         '广西',
+        2025,
+        '47',
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        '636',
+        '1153',
+        NULL,
+        NULL,
+        '录取批次：提前批其他类 II。'
+    ),
+    (
+        '广西',
         2024,
         '45',
         NULL,
@@ -728,18 +744,19 @@ INSERT INTO admission_scores (
     (
         '吉林',
         2025,
-        NULL,
+        '18',
         '0',
         '0',
         NULL,
         NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL
+        '667',
+        '391',
+        '652',
+        '907',
+        '638（生物奥赛银牌，机试成绩很高）
+643',
+        '1355',
+        '拟录取考生中 1 人生物奥赛银牌高考成绩 638 分（高考成绩最低分），且机试成绩很高。'
     ),
     (
         '吉林',
@@ -979,6 +996,22 @@ INSERT INTO admission_scores (
         '1597',
         '640',
         '2111',
+        NULL
+    ),
+    (
+        '内蒙古',
+        2025,
+        '22',
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        '668',
+        NULL,
+        '648',
+        '1272',
+        NULL,
+        NULL,
         NULL
     ),
     (

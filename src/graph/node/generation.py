@@ -91,6 +91,15 @@ class GenerationComponent:
             "输出表格时，优先按字段说明中的列顺序组织表头；当数据存在明确对比维度时，请整理成简洁、规范的表格返回。"
         )
 
+    @staticmethod
+    def _has_sufficient_context(*, has_material: bool, eval_result: str | None) -> bool:
+        if not has_material:
+            return False
+        normalized_eval = str(eval_result or "").strip()
+        if not normalized_eval:
+            return True
+        return normalized_eval == "sufficient"
+
     @classmethod
     def _history_text(cls, messages: Sequence[Any], max_turns: int = 6) -> str:
         rows: list[str] = []
@@ -161,12 +170,17 @@ class GenerationComponent:
         system_suffix: str = "",
         channel: str = "",
         qa_doc: Any = None,
+        eval_result: str | None = None,
     ) -> str:
         active_model_kind = model_id or self.model_id or "generation"
         model = get_model(active_model_kind, channel=channel)
         chunk_texts = self._chunk_texts(chunks)
         structured_text = self._structured_results_text(list(structured_results or []))
-        has_context = bool(chunk_texts or structured_text)
+        has_material = bool(chunk_texts or structured_text or qa_doc)
+        has_context = self._has_sufficient_context(
+            has_material=has_material,
+            eval_result=eval_result,
+        )
         context_parts: list[str] = []
         if chunk_texts:
             context_parts.append("\n".join(chunk_texts))
@@ -174,6 +188,7 @@ class GenerationComponent:
             context_parts.append(self._structured_results_guidance_text())
             context_parts.append(f"SQL 结构化结果：\n{structured_text}")
         context = "\n\n".join(context_parts) if context_parts else "（本轮无可用参考材料）"
+        effective_context = context if has_context else "（本轮无可用参考材料）"
         history = self._history_text(messages or [])
 
         system_prompt = build_generation_system_prompt(
@@ -186,7 +201,7 @@ class GenerationComponent:
             query=query,
             query_mode=query_mode,
             history=history,
-            context=context,
+            context=effective_context,
             qa_doc=qa_doc,
         )
 
@@ -269,6 +284,7 @@ def create_generation_node(*, model_id: str | None = None):
 
             channel = str(state.get("channel") or "").strip().lower()
             system_suffix = WECHAT_SYSTEM_SUFFIX if channel == "wechat" else ""
+            eval_result = str(state.get("eval_result") or "").strip()
 
             answer = await component.generate(
                 query=query,
@@ -281,6 +297,7 @@ def create_generation_node(*, model_id: str | None = None):
                 system_suffix=system_suffix,
                 channel=channel,
                 qa_doc=qa_doc,
+                eval_result=eval_result,
             )
             logger.debug(
                 "Generation done.\n"

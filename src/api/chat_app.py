@@ -193,6 +193,10 @@ class _ThreadRunLeaseRegistry:
         async with self._lock:
             self._active_thread_ids.discard(thread_id)
 
+    async def is_active(self, thread_id: str) -> bool:
+        async with self._lock:
+            return thread_id in self._active_thread_ids
+
 
 class _DeviceRateLimiter:
     """In-memory sliding-window counter per device ID."""
@@ -335,6 +339,201 @@ def _assert_thread_create_allowed(
     metadata = _thread_metadata(state)
     if metadata.get("device_id") != _get_device_id(request):
         raise HTTPException(status_code=404, detail="Thread not found")
+
+
+def _stringify_message_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "text":
+                text = str(item.get("text", "")).strip()
+                if text:
+                    parts.append(text)
+                continue
+            text = str(item.get("content", "")).strip()
+            if text:
+                parts.append(text)
+        return " ".join(part for part in parts if part).strip()
+    if isinstance(content, dict):
+        text = str(content.get("text") or content.get("content") or "").strip()
+        if text:
+            return text
+    return str(content or "").strip()
+
+
+def _messages_from_state(state: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(state, dict):
+        return []
+    values = state.get("values", {})
+    if not isinstance(values, dict):
+        return []
+    messages = values.get("messages", [])
+    if not isinstance(messages, list):
+        return []
+    return [msg for msg in messages if isinstance(msg, dict)]
+
+
+def _message_role(message_type: str) -> str:
+    normalized = str(message_type or "").strip().lower()
+    if normalized in {"human", "user"}:
+        return "user"
+    if normalized in {"ai", "assistant"}:
+        return "assistant"
+    if normalized == "tool":
+        return "tool"
+    if normalized == "system":
+        return "system"
+    return normalized or "unknown"
+
+
+def _conversation_title(messages: list[dict[str, Any]], fallback: str) -> str:
+    for message in messages:
+        if _message_role(str(message.get("type", ""))) != "user":
+            continue
+        text = _stringify_message_content(message.get("content"))
+        if text:
+            return text[:80]
+    return fallback
+
+
+def _conversation_preview(messages: list[dict[str, Any]]) -> str:
+    for message in reversed(messages):
+        text = _stringify_message_content(message.get("content"))
+        if text:
+            return text[:140]
+    return ""
+
+
+def _normalize_admin_message(message: dict[str, Any], index: int) -> dict[str, Any]:
+    message_type = str(message.get("type", "")).strip().lower()
+    return {
+        "id": message.get("id") or f"message-{index}",
+        "index": index,
+        "type": message_type or "unknown",
+        "role": _message_role(message_type),
+        "text": _stringify_message_content(message.get("content")),
+        "content": message.get("content"),
+    }
+
+
+def _admin_thread_summary(thread: dict[str, Any]) -> dict[str, Any]:
+    messages = _messages_from_state(thread)
+    metadata = thread.get("metadata", {})
+    metadata = metadata if isinstance(metadata, dict) else {}
+    normalized_messages = [
+        _normalize_admin_message(message, index)
+        for index, message in enumerate(messages)
+    ]
+    return {
+        "thread_id": thread.get("thread_id"),
+        "user_id": str(metadata.get("device_id") or "unknown"),
+        "assistant_id": str(metadata.get("graph_id") or "agent"),
+        "created_at": thread.get("created_at"),
+        "updated_at": thread.get("updated_at") or thread.get("state_updated_at"),
+        "title": _conversation_title(messages, str(thread.get("thread_id") or "未命名会话")),
+        "preview": _conversation_preview(messages),
+        "message_count": len(normalized_messages),
+        "user_message_count": sum(1 for item in normalized_messages if item["role"] == "user"),
+        "assistant_message_count": sum(1 for item in normalized_messages if item["role"] == "assistant"),
+        "metadata": metadata,
+    }
+
+
+def _build_admin_conversation_overview(
+    threads: list[dict[str, Any]],
+    *,
+    total_threads: int,
+    total_users: int,
+    limit: int,
+    offset: int,
+) -> dict[str, Any]:
+    grouped_users: dict[str, dict[str, Any]] = {}
+    total_messages = 0
+
+    for thread in threads:
+        summary = _admin_thread_summary(thread)
+        user_id = summary["user_id"]
+        user_entry = grouped_users.setdefault(
+            user_id,
+            {
+                "user_id": user_id,
+                "thread_count": 0,
+                "message_count": 0,
+                "last_active_at": summary["updated_at"],
+                "threads": [],
+            },
+        )
+        user_entry["thread_count"] += 1
+        user_entry["message_count"] += int(summary["message_count"])
+        total_messages += int(summary["message_count"])
+
+        last_active_at = str(user_entry.get("last_active_at") or "")
+        updated_at = str(summary.get("updated_at") or "")
+        if updated_at > last_active_at:
+            user_entry["last_active_at"] = updated_at
+
+        user_entry["threads"].append(summary)
+
+    users = list(grouped_users.values())
+    for user_entry in users:
+        user_entry["threads"].sort(
+            key=lambda item: str(item.get("updated_at") or ""),
+            reverse=True,
+        )
+
+    users.sort(key=lambda item: str(item.get("last_active_at") or ""), reverse=True)
+
+    return {
+        "users": users,
+        "stats": {
+            "user_count": len(users),
+            "thread_count": len(threads),
+            "message_count": total_messages,
+        },
+        "totals": {
+            "user_count": total_users,
+            "thread_count": total_threads,
+        },
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "page": (offset // limit) + 1 if limit > 0 else 1,
+            "page_count": ((total_threads - 1) // limit) + 1 if limit > 0 and total_threads > 0 else 1,
+            "has_prev": offset > 0,
+            "has_next": offset + len(threads) < total_threads,
+        },
+    }
+
+
+def _build_admin_conversation_detail(
+    *,
+    thread_id: str,
+    thread: dict[str, Any],
+) -> dict[str, Any]:
+    metadata = thread.get("metadata", {})
+    metadata = metadata if isinstance(metadata, dict) else {}
+    messages = [
+        _normalize_admin_message(message, index)
+        for index, message in enumerate(_messages_from_state(thread))
+    ]
+    return {
+        "thread_id": thread_id,
+        "user_id": str(metadata.get("device_id") or "unknown"),
+        "assistant_id": str(metadata.get("graph_id") or "agent"),
+        "created_at": thread.get("created_at"),
+        "updated_at": thread.get("updated_at") or thread.get("state_updated_at"),
+        "title": _conversation_title(_messages_from_state(thread), thread_id),
+        "message_count": len(messages),
+        "metadata": metadata,
+        "messages": messages,
+    }
 
 
 def create_app() -> FastAPI:
@@ -528,6 +727,82 @@ def create_app() -> FastAPI:
                     os.unlink(tmp_path)
                 except OSError:
                     pass
+
+    @app.get("/admin/conversations")
+    def admin_conversations(
+        limit: int = 200,
+        offset: int = 0,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        rt = _runtime_or_503()
+        normalized_limit = max(1, min(limit, 1000))
+        normalized_offset = max(0, offset)
+        metadata = {"device_id": user_id} if user_id else None
+        threads = rt.search_threads(
+            metadata=metadata,
+            limit=normalized_limit,
+            offset=normalized_offset,
+        )
+        return _build_admin_conversation_overview(
+            threads,
+            total_threads=rt.count_threads(metadata=metadata),
+            total_users=rt.count_distinct_thread_metadata_values(
+                metadata_key="device_id",
+                metadata_filter=metadata,
+            ),
+            limit=normalized_limit,
+            offset=normalized_offset,
+        )
+
+    @app.get("/admin/conversations/{thread_id}")
+    def admin_conversation_detail(thread_id: str) -> dict[str, Any]:
+        rt = _runtime_or_503()
+        state = rt.get_thread_state(thread_id=thread_id)
+        if not _thread_exists(state):
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        registry_row = rt.get_registry_thread(thread_id=thread_id)
+        if isinstance(registry_row, dict):
+            enriched_thread = {
+                "thread_id": thread_id,
+                "created_at": registry_row.get("created_at"),
+                "updated_at": registry_row.get("updated_at"),
+                "state_updated_at": state.get("created_at"),
+                "metadata": _thread_metadata(state),
+                "values": state.get("values", {}) if isinstance(state.get("values"), dict) else {},
+            }
+        else:
+            enriched_thread = {
+                "thread_id": thread_id,
+                "created_at": state.get("created_at"),
+                "updated_at": state.get("created_at"),
+                "state_updated_at": state.get("created_at"),
+                "metadata": _thread_metadata(state),
+                "values": state.get("values", {}) if isinstance(state.get("values"), dict) else {},
+            }
+
+        return _build_admin_conversation_detail(thread_id=thread_id, thread=enriched_thread)
+
+    @app.delete("/admin/conversations/{thread_id}")
+    async def admin_delete_conversation(thread_id: str) -> dict[str, Any]:
+        rt = _runtime_or_503()
+        lease_registry: _ThreadRunLeaseRegistry = app.state.thread_run_leases
+        if await lease_registry.is_active(thread_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Thread is currently running and cannot be deleted",
+            )
+
+        deleted = await asyncio.to_thread(rt.delete_thread, thread_id=thread_id)
+        if not bool(deleted.get("existed")):
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        _logger.info("Admin deleted thread %s: %s", thread_id, deleted)
+        return {
+            "ok": True,
+            "thread_id": thread_id,
+            "deleted": deleted,
+        }
 
     def _run_ingest(file_path: str, category: str | None) -> int:
         """Synchronous wrapper — called via asyncio.to_thread."""

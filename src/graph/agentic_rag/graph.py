@@ -117,7 +117,12 @@ def create_agentic_rag_node(
             raise
         except Exception as exc:
             logger.error(f"AgenticRAG sub-graph error {type(exc).__name__}: {exc}")
-            return {"chunks": [], "structured_results": []}
+            return {
+                "chunks": [],
+                "structured_results": [],
+                "eval_result": "insufficient_docs",
+                "eval_reason": "AgenticRAG 子图异常",
+            }
 
         chunks = list(final_state.get("chunks") or [])
         structured_results = list(final_state.get("structured_results") or [])
@@ -135,6 +140,8 @@ def create_agentic_rag_node(
         return {
             "chunks": chunks,
             "structured_results": structured_results,
+            "eval_result": eval_result,
+            "eval_reason": str(final_state.get("eval_reason") or ""),
             "qa_doc": qa_doc,
         }
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sqlite3
 import time
 from collections import OrderedDict
 from contextlib import nullcontext
@@ -64,6 +65,13 @@ class _LRUThreadCache:
         for key in expired:
             del self._data[key]
         return result
+
+    def delete(self, key: str) -> dict[str, Any] | None:
+        entry = self._data.pop(key, None)
+        if entry is None:
+            return None
+        value, _ = entry
+        return value
 
     def __len__(self) -> int:
         return len(self._data)
@@ -402,6 +410,7 @@ class AdmissionGraphRuntime:
         self._thread_registry: ThreadRegistry | None = None
         self._graph: Any | None = None
         self.runtime_root: Path | None = None
+        self._checkpoint_db_path: Path | None = None
         self._threads = _LRUThreadCache(
             maxsize=int(os.getenv("THREAD_CACHE_MAX", str(_DEFAULT_THREAD_CACHE_MAX))),
             ttl=float(os.getenv("THREAD_CACHE_TTL", str(_DEFAULT_THREAD_CACHE_TTL))),
@@ -455,6 +464,7 @@ class AdmissionGraphRuntime:
             retriever = _create_retriever(self.cfg.env_file)
             self._vector_store = retriever
             checkpoint_path = self.cfg.checkpoint_path or (self.runtime_root / "checkpoints.sqlite")
+            self._checkpoint_db_path = checkpoint_path
             self._checkpointer, self._checkpointer_cm = await _load_sqlite_checkpointer(checkpoint_path)
             self._thread_registry = ThreadRegistry(self.runtime_root / "thread_registry.sqlite")
 
@@ -514,6 +524,7 @@ class AdmissionGraphRuntime:
                 await exit_fn(None, None, None)
         self._checkpointer = None
         self._checkpointer_cm = None
+        self._checkpoint_db_path = None
         _shutdown_langfuse_client(self._langfuse_public_key)
         self._langfuse_public_key = None
 
@@ -606,6 +617,56 @@ class AdmissionGraphRuntime:
         start = max(0, int(offset))
         end = start + max(0, int(limit))
         return items[start:end]
+
+    def count_threads(self, *, metadata: dict[str, Any] | None = None) -> int:
+        if self._thread_registry is not None:
+            return self._thread_registry.count_threads(metadata_filter=metadata)
+
+        items = self._threads.values()
+        if not metadata:
+            return len(items)
+
+        def _match(item: dict[str, Any]) -> bool:
+            thread_meta = item.get("metadata", {})
+            if not isinstance(thread_meta, dict):
+                return False
+            for key, value in metadata.items():
+                if thread_meta.get(key) != value:
+                    return False
+            return True
+
+        return sum(1 for item in items if _match(item))
+
+    def count_distinct_thread_metadata_values(
+        self,
+        *,
+        metadata_key: str,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> int:
+        if self._thread_registry is not None:
+            return self._thread_registry.count_distinct_metadata_values(
+                metadata_key=metadata_key,
+                metadata_filter=metadata_filter,
+            )
+
+        values: set[str] = set()
+        for item in self._threads.values():
+            thread_meta = item.get("metadata", {})
+            if not isinstance(thread_meta, dict):
+                continue
+            if metadata_filter:
+                for key, value in metadata_filter.items():
+                    if thread_meta.get(key) != value:
+                        break
+                else:
+                    normalized = str(thread_meta.get(metadata_key) or "").strip()
+                    if normalized:
+                        values.add(normalized)
+                continue
+            normalized = str(thread_meta.get(metadata_key) or "").strip()
+            if normalized:
+                values.add(normalized)
+        return len(values)
 
     @staticmethod
     def _extract_query_from_input(input_payload: Any) -> str:
@@ -721,6 +782,43 @@ class AdmissionGraphRuntime:
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
             "metadata": normalized_metadata if isinstance(normalized_metadata, dict) else {},
+        }
+
+    def delete_thread(self, *, thread_id: str) -> dict[str, int | bool]:
+        checkpoint_deleted = 0
+        write_deleted = 0
+
+        if self._checkpoint_db_path is not None:
+            conn = sqlite3.connect(str(self._checkpoint_db_path))
+            try:
+                conn.execute("PRAGMA busy_timeout = 5000")
+                cursor = conn.execute(
+                    "DELETE FROM writes WHERE thread_id = ?",
+                    (thread_id,),
+                )
+                write_deleted = max(0, int(cursor.rowcount or 0))
+                cursor = conn.execute(
+                    "DELETE FROM checkpoints WHERE thread_id = ?",
+                    (thread_id,),
+                )
+                checkpoint_deleted = max(0, int(cursor.rowcount or 0))
+                conn.commit()
+            finally:
+                conn.close()
+
+        registry_deleted = 0
+        if self._thread_registry is not None:
+            registry_deleted = self._thread_registry.delete_thread(thread_id)
+
+        cache_deleted = self._threads.delete(thread_id) is not None
+        existed = any((checkpoint_deleted, write_deleted, registry_deleted)) or cache_deleted
+
+        return {
+            "existed": existed,
+            "checkpoints": checkpoint_deleted,
+            "writes": write_deleted,
+            "registry_rows": registry_deleted,
+            "cache_entries": 1 if cache_deleted else 0,
         }
 
     def get_thread_history(self, *, thread_id: str, limit: int = 10) -> list[dict[str, Any]]:

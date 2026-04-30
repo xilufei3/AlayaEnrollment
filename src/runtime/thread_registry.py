@@ -72,6 +72,15 @@ class ThreadRegistry:
         )
         conn.commit()
 
+    def delete_thread(self, thread_id: str) -> int:
+        conn = self._ensure_conn()
+        cursor = conn.execute(
+            "DELETE FROM threads WHERE thread_id = ?",
+            (thread_id,),
+        )
+        conn.commit()
+        return max(0, int(cursor.rowcount or 0))
+
     def list_threads(
         self,
         *,
@@ -122,6 +131,58 @@ class ThreadRegistry:
         if metadata_filter:
             out = out[offset : offset + limit]
         return out
+
+    def count_threads(self, *, metadata_filter: dict[str, Any] | None = None) -> int:
+        conn = self._ensure_conn()
+        if not metadata_filter:
+            row = conn.execute("SELECT COUNT(*) FROM threads").fetchone()
+            return int(row[0] if row else 0)
+
+        rows = conn.execute("SELECT metadata FROM threads").fetchall()
+        total = 0
+        for (meta_json,) in rows:
+            try:
+                meta = json.loads(meta_json) if meta_json else {}
+            except (TypeError, ValueError):
+                meta = {}
+            if not isinstance(meta, dict):
+                continue
+            for key, value in metadata_filter.items():
+                if meta.get(key) != value:
+                    break
+            else:
+                total += 1
+        return total
+
+    def count_distinct_metadata_values(
+        self,
+        *,
+        metadata_key: str,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> int:
+        conn = self._ensure_conn()
+        rows = conn.execute("SELECT metadata FROM threads").fetchall()
+        values: set[str] = set()
+        for (meta_json,) in rows:
+            try:
+                meta = json.loads(meta_json) if meta_json else {}
+            except (TypeError, ValueError):
+                meta = {}
+            if not isinstance(meta, dict):
+                continue
+            if metadata_filter:
+                for key, value in metadata_filter.items():
+                    if meta.get(key) != value:
+                        break
+                else:
+                    normalized = str(meta.get(metadata_key) or "").strip()
+                    if normalized:
+                        values.add(normalized)
+                continue
+            normalized = str(meta.get(metadata_key) or "").strip()
+            if normalized:
+                values.add(normalized)
+        return len(values)
 
     def get_thread(self, thread_id: str) -> dict[str, Any] | None:
         conn = self._ensure_conn()

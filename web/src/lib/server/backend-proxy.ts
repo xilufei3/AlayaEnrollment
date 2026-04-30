@@ -4,6 +4,9 @@ const ALLOWED_STATIC_PATHS = new Set([
   "threads/search",
   "runs/stream",
   "chat/stream",
+  "admin/conversations",
+  "admin/collection/stats",
+  "admin/ingest",
 ]);
 
 function normalizePathSegments(path: string[]): string[] {
@@ -46,6 +49,14 @@ export function isAllowedProxyPath(path: string[]): boolean {
     segments[0] === "threads" &&
     segments[2] === "runs" &&
     segments[3] === "stream"
+  ) {
+    return true;
+  }
+
+  if (
+    segments.length === 3 &&
+    segments[0] === "admin" &&
+    segments[1] === "conversations"
   ) {
     return true;
   }

@@ -24,7 +24,7 @@ def create_direct_reply_node(*, model_id: str | None = None):
         runtime_model_id = getattr(getattr(runtime, "context", None), "chat_model_id", None)
         system_prompt, fallback_answer = get_direct_reply_prompt_bundle(intent)
 
-        user = f"用户问题：{query}\n请输出一句回复："
+        user = query
         answer = await component.generate_short(
             system_prompt=system_prompt,
             user_prompt=user,
